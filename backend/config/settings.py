@@ -142,6 +142,12 @@ REST_FRAMEWORK = {
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    # `last_login` aparece na lista de usuários do administrador.
+    "UPDATE_LAST_LOGIN": True,
+    # Cada token leva um hash da senha: trocar ou redefinir a senha invalida, na hora, os
+    # tokens já emitidos (REST, GraphQL e WebSocket). Não usa o app de blacklist. Usuário
+    # inativo já é recusado por padrão (CHECK_USER_IS_ACTIVE) ao autenticar e ao renovar.
+    "CHECK_REVOKE_TOKEN": True,
 }
 
 GRAPHENE = {"SCHEMA": "config.schema.schema"}
@@ -188,6 +194,15 @@ if not EXAMS_UPLOAD_DIR.is_absolute():
     EXAMS_UPLOAD_DIR = BASE_DIR / EXAMS_UPLOAD_DIR
 EXAMS_MAX_UPLOAD_BYTES = int(os.getenv("EXAMS_MAX_UPLOAD_MB", "20")) * 1024 * 1024
 EXAMS_MAX_PAGES = int(os.getenv("EXAMS_MAX_PAGES", "60"))
+# Liga/desliga o modelo (LLM) na extração. Desligado, só as regras determinísticas leem o laudo:
+# o worker nem tenta falar com o Ollama; o que as regras não leem vira aviso `block_unreadable`
+# (dá para digitar o resultado) e páginas sem texto (PDF escaneado) falham com `llm_disabled`.
+EXTRACTION_USE_LLM = os.getenv("EXTRACTION_USE_LLM", "true").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
 # Tempo de parede máximo gasto em chamadas ao LLM por laudo. Estourado o teto, o que sobra
 # do LLM é pulado (aviso `llm_budget_exceeded`); o que as regras leem não depende dele.
 EXTRACTION_LLM_BUDGET_SECONDS = int(os.getenv("EXTRACTION_LLM_BUDGET_SECONDS", "240"))

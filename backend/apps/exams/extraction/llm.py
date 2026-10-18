@@ -14,6 +14,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 import requests
+from django.conf import settings
 from urllib3.exceptions import ReadTimeoutError
 
 from ..codes import ErrorCode
@@ -356,5 +357,31 @@ def _error_detail(response: requests.Response) -> str:
     return str(payload.get("error", "")) if isinstance(payload, dict) else ""
 
 
+class DisabledLLMClient:
+    """Cliente de `EXTRACTION_USE_LLM=false`: nunca fala com o Ollama (nem tenta conectar).
+
+    O pipeline não pergunta nada ao modelo nesse modo (orçamento zero). Uma página sem texto
+    (escaneada) volta vazia daqui; `analyze` a trata: vira "página não lida" ou, se o laudo
+    inteiro é imagem, falha com `llm_disabled`.
+    """
+
+    model = ""
+    vision_model = ""
+
+    def extract_header(self, text: str) -> dict:
+        return {}
+
+    def extract_results(self, block_text: str, page: int) -> dict:
+        return {}
+
+    def match_analyte(self, name: str, unit: str, candidates: list[tuple[str, str]]) -> str:
+        return ""
+
+    def transcribe_page(self, png: bytes) -> str:
+        return ""
+
+
 def build_llm_client() -> LLMClient:
+    if not settings.EXTRACTION_USE_LLM:
+        return DisabledLLMClient()
     return OllamaClient()

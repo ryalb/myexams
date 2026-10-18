@@ -47,9 +47,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
-from .codes import WarningCode
 from .extraction.analytes import AnalyteResolver
-from .extraction.flags import printed_flag_direction
 from .extraction.pipeline import (
     drop_superseded_previous,
     find_accession_clash,
@@ -58,10 +56,11 @@ from .extraction.pipeline import (
     laboratory_for,
     review_status_of_document,
 )
-from .extraction.recompute import recompute_result
+from .extraction.recompute import recompute_result, rederived_warnings
 from .extraction.text import normalize_name
-from .extraction.validate import is_implausible, needs_review, warning
+from .extraction.validate import needs_review
 from .models import (
+    CURRENT_ORIGINS,
     Analyte,
     Comparator,
     DocumentStatus,
@@ -646,40 +645,6 @@ class ImportReport:
         return sum(o.history for o in self.outcomes)
 
 
-def _rederived_warnings(result: ExamResult, previous: list[dict]) -> list[dict]:
-    """Avisos de uma linha recalculada: só o que dá para saber sem o texto do laudo."""
-    analyte = result.analyte
-    warnings = [w for w in previous if w["code"] == WarningCode.PAGE_READ_BY_VISION]
-    if analyte is None:
-        warnings.append(warning(WarningCode.UNMAPPED_ANALYTE))
-    if not result.value_raw.strip():
-        warnings.append(warning(WarningCode.VALUE_MISSING))
-    if result.value_numeric is not None:
-        if analyte and analyte.canonical_unit:
-            if not result.unit:
-                warnings.append(warning(WarningCode.UNIT_MISSING))
-            elif result.value_canonical is None:
-                warnings.append(warning(WarningCode.UNIT_NOT_CONVERTIBLE, unit=result.unit))
-        elif not result.unit:
-            warnings.append(warning(WarningCode.UNIT_MISSING))
-        if is_implausible(
-            result.value_canonical,
-            analyte.plausible_min if analyte else None,
-            analyte.plausible_max if analyte else None,
-        ):
-            warnings.append(warning(WarningCode.IMPLAUSIBLE_VALUE))
-    if result.reference_raw and not result.ref_bands:
-        warnings.append(warning(WarningCode.REFERENCE_NOT_PARSED))
-    direction = printed_flag_direction(result.flag_printed)
-    if (
-        direction
-        and result.flag in (ResultFlag.LOW, ResultFlag.HIGH, ResultFlag.NORMAL)
-        and direction != result.flag
-    ):
-        warnings.append(warning(WarningCode.FLAG_MISMATCH))
-    return warnings
-
-
 class _Importer:
     def __init__(self, user, analytes: dict[str, Analyte]) -> None:
         self.user = user
@@ -701,7 +666,7 @@ class _Importer:
             return result
 
         recompute_result(result, sex=self.sex, birth_date=self.birth_date, resolver=self.resolver)
-        result.warnings = _rederived_warnings(result, parsed.fields["warnings"])
+        result.warnings = rederived_warnings(result, parsed.fields["warnings"])
         if parsed.review_status not in _DECIDED_REVIEW:
             result.review_status = (
                 ReviewStatus.NEEDS_REVIEW
@@ -739,7 +704,7 @@ class _Importer:
             return DocumentOutcome(name, "skipped_keep")
         kept = [r for r in parsed.results if r.keep]
         report.rows_dropped += len(parsed.results) - len(kept)
-        if not any(r.fields["origin"] == ResultOrigin.CURRENT for r in kept):
+        if not any(r.fields["origin"] in CURRENT_ORIGINS for r in kept):
             return DocumentOutcome(name, "skipped_empty")
 
         if self._already_exists(parsed):
@@ -764,7 +729,7 @@ class _Importer:
         current_keys = {
             key
             for r in rows
-            if r.origin == ResultOrigin.CURRENT
+            if r.origin in CURRENT_ORIGINS
             and (key := history_key(r.analyte, r.collected_at)) is not None
         }
         drop_superseded_previous(self.user, current_keys, exclude=document)
@@ -790,7 +755,7 @@ class _Importer:
 
         document.status = review_status_of_document(stored, document.warnings)
         document.save(update_fields=["status", "updated_at"])
-        current = sum(1 for r in stored if r.origin == ResultOrigin.CURRENT)
+        current = sum(1 for r in stored if r.origin in CURRENT_ORIGINS)
         return DocumentOutcome(name, "created", results=current, history=len(stored) - current)
 
 

@@ -15,7 +15,8 @@ onMounted(() => {
   currentUser.fetchUser()
 })
 
-const menuGroups = [
+// "Usuários" só aparece para administradores (o servidor confere o papel de novo em cada chamada).
+const menuGroups = computed(() => [
   {
     titleKey: 'nav.groupMain',
     items: [
@@ -25,9 +26,14 @@ const menuGroups = [
   },
   {
     titleKey: 'nav.groupAccount',
-    items: [{ labelKey: 'nav.profile', path: '/profile', icon: 'mdi:account-outline' }],
+    items: [
+      { labelKey: 'nav.profile', path: '/profile', icon: 'mdi:account-outline' },
+      ...(currentUser.isAdmin
+        ? [{ labelKey: 'nav.users', path: '/admin/users', icon: 'mdi:account-group-outline' }]
+        : []),
+    ],
   },
-]
+])
 </script>
 
 <template>

@@ -30,20 +30,20 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.test.utils import override_settings
 
 from apps.exams import reports_json, tasks
 from apps.exams.catalog import sync_catalog
 from apps.exams.codes import ErrorCode
 from apps.exams.models import (
+    CURRENT_ORIGINS,
     Analyte,
     AnalyteAlias,
     ExamDocument,
     Profile,
-    ResultOrigin,
     ReviewStatus,
     UnitConversion,
 )
+from apps.exams.offline import offline_settings
 from apps.exams.storage import PDF_MAGIC, delete_upload, save_upload
 
 from .import_reports import chunks_of, find_pdfs, resolve_user, sha256_of
@@ -158,13 +158,8 @@ class Command(BaseCommand):
     def _extract(self, template, files: list[Path], *, include_text: bool) -> list[dict]:
         entries: list[dict] = []
         seen: set[str] = set()
-        # Sem Redis (eventos em memória) e sem modelo (orçamento zero: o pipeline pula todo LLM).
-        offline = override_settings(
-            CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
-            EXTRACTION_LLM_BUDGET_SECONDS=0,
-        )
         try:
-            with offline, transaction.atomic():
+            with offline_settings(), transaction.atomic():
                 sync_catalog(Analyte, AnalyteAlias, UnitConversion)  # revertido no fim
                 for index, path in enumerate(files, start=1):
                     entry = self._one(template, path, include_text=include_text)
@@ -257,7 +252,7 @@ class Command(BaseCommand):
     def _line(name: str, entry: dict) -> str:
         if entry["status"] == "failed":
             return f"{name}: FALHOU — {entry['error_code']}"
-        current = [r for r in entry["results"] if r["origin"] == ResultOrigin.CURRENT]
+        current = [r for r in entry["results"] if r["origin"] in CURRENT_ORIGINS]
         pending = sum(1 for r in current if r["review_status"] == ReviewStatus.NEEDS_REVIEW)
         previous = len(entry["results"]) - len(current)
         return (

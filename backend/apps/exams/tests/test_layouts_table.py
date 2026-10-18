@@ -458,10 +458,10 @@ def test_budget_exhausted_by_the_first_llm_unit_skips_the_rest(monkeypatch, user
     assert stats["skipped_blocks"] == 2
     assert stats["llm_seconds"] == BUDGET + 1
 
-    # Avisos do laudo: uma por página pulada e um único aviso do orçamento (sem nomes/valores).
+    # Avisos do laudo: um por bloco pulado (página + nome do exame) e um único do orçamento.
     assert document.warnings == [
-        {"code": WarningCode.BLOCK_UNREADABLE, "params": {"page": 2}},
-        {"code": WarningCode.BLOCK_UNREADABLE, "params": {"page": 3}},
+        {"code": WarningCode.BLOCK_UNREADABLE, "params": {"page": 2, "title": "UROBILINOGÊNIO"}},
+        {"code": WarningCode.BLOCK_UNREADABLE, "params": {"page": 3, "title": "BILIRRUBINA"}},
         {"code": WarningCode.LLM_BUDGET_EXCEEDED, "params": {"seconds": BUDGET}},
     ]
     assert document.status == DocumentStatus.NEEDS_REVIEW

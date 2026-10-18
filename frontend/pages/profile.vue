@@ -107,5 +107,7 @@ async function save() {
         {{ saving ? $t('common.saving') : $t('common.save') }}
       </Button>
     </form>
+
+    <ProfileChangePasswordCard />
   </div>
 </template>

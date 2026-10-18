@@ -4,6 +4,12 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from apps.exams.accounts_api import (
+    AdminUserDetailAPIView,
+    AdminUserListCreateAPIView,
+    AdminUserResetPasswordAPIView,
+    ChangePasswordAPIView,
+)
 from apps.exams.graphql_view import JWTGraphQLView
 from apps.exams.views import (
     AnalyteViewSet,
@@ -28,8 +34,18 @@ urlpatterns = [
     path("health/", HealthCheckAPIView.as_view(), name="health"),
     path("api/v1/auth/me/", CurrentUserAPIView.as_view(), name="current-user"),
     path("api/v1/auth/register/", RegisterAPIView.as_view(), name="register"),
+    path("api/v1/auth/change-password/", ChangePasswordAPIView.as_view(), name="change-password"),
     path("api/v1/auth/token/", ThrottledTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/v1/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("api/v1/admin/users/", AdminUserListCreateAPIView.as_view(), name="admin-user-list"),
+    path(
+        "api/v1/admin/users/<int:pk>/", AdminUserDetailAPIView.as_view(), name="admin-user-detail"
+    ),
+    path(
+        "api/v1/admin/users/<int:pk>/reset-password/",
+        AdminUserResetPasswordAPIView.as_view(),
+        name="admin-user-reset-password",
+    ),
     path("api/v1/laboratories/", LaboratoryListAPIView.as_view(), name="laboratory-list"),
     path("api/v1/profile/", ProfileAPIView.as_view(), name="profile"),
     path("api/v1/overview/", OverviewAPIView.as_view(), name="overview"),

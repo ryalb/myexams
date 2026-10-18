@@ -119,7 +119,7 @@ páginas a partir de `ExamDocument.page_text`, o que dispensa o PDF.
 | Cabeçalho do laudo | `pipeline.py` (+ `llm.py`) | Regex primeiro; o LLM só entra se o regex achar menos de 3 dos 5 campos (e completa os vazios) |
 | Linhas de resultado de blocos com 1 exame | `layouts.py` (regras) | Sem LLM; a referência é copiada pelo código |
 | Linhas de resultado de tabelas simples (`NOME \| VALOR \| UNIDADE \| REFERÊNCIA`, hemograma com percentual + absoluto) | `layouts.py` (regras de tabela) | Sem LLM; na dúvida, o bloco inteiro vai ao LLM (nunca meia tabela) |
-| Linhas de resultado dos demais blocos | `llm.py` + `compact.py` | **Só aqui o LLM decide o que ler** (resposta curta em texto), limitado por `EXTRACTION_LLM_BUDGET_SECONDS`: estourado o teto, o resto é pulado com `block_unreadable` + `llm_budget_exceeded` |
+| Linhas de resultado dos demais blocos | `llm.py` + `compact.py` | **Só aqui o LLM decide o que ler** (resposta curta em texto), limitado por `EXTRACTION_LLM_BUDGET_SECONDS`: estourado o teto, o resto é pulado com `block_unreadable` (um por bloco: página + nome do exame) + `llm_budget_exceeded` |
 | Números, comparadores e ponto/vírgula | `numbers.py` | Sim |
 | Unidades e conversões | `units.py` | Sim |
 | Faixas de referência (sexo, idade, rótulos) | `reference.py` | Sim |

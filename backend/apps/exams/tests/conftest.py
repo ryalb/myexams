@@ -19,6 +19,10 @@ def _isolated_infra(settings, tmp_path):
     settings.CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
     settings.EXAMS_UPLOAD_DIR = tmp_path / "uploads"
     settings.CELERY_TASK_ALWAYS_EAGER = True
+    # Hermético: o `.env` de quem roda os testes pode ter EXTRACTION_USE_LLM=false (modo só
+    # regras); os testes com LLM falso precisam do padrão ligado. Quem testa o desligado
+    # (test_llm_toggle.py) muda explicitamente.
+    settings.EXTRACTION_USE_LLM = True
 
 
 def make_user(email="joao@example.com", first="Joao", last="Teste da Silva", sex="male"):

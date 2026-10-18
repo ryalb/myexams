@@ -20,6 +20,7 @@ from django.utils import timezone
 
 from ..codes import ErrorCode, WarningCode
 from ..models import (
+    CURRENT_ORIGINS,
     Analyte,
     Comparator,
     DocumentStatus,
@@ -704,6 +705,26 @@ def _plan(block: blocks_mod.Block) -> _Plan:
     return _Plan(block, "llm", chunks=split_for_llm(block))
 
 
+UNREADABLE_TITLE_MAX = 80
+
+
+def unreadable_title(block: blocks_mod.Block) -> str:
+    """Nome do exame como impresso, para o aviso `block_unreadable`.
+
+    Só o nome: o que vem depois de `|` ou `:` (valor, unidade, referência) é cortado, e o
+    material (`, soro`) também. Sem título, vale a primeira linha não vazia do bloco, com o
+    mesmo corte. Nunca devolve outro trecho do bloco; no máximo `UNREADABLE_TITLE_MAX` caracteres.
+    """
+
+    def name_of(line: str) -> str:
+        head = line.split("|", 1)[0].split(":", 1)[0]
+        return blocks_mod.split_title(" ".join(head.split()))[0]
+
+    candidates = [block.title, *block.lines]
+    title = next((name for line in candidates if (name := name_of(line))), "")
+    return title[:UNREADABLE_TITLE_MAX].rstrip()
+
+
 @dataclass
 class _Calls:
     count: int = 0
@@ -860,7 +881,9 @@ def analyze(
     telemetry: LLMTelemetry | None = None,
 ) -> Analysis:
     telemetry = telemetry if telemetry is not None else LLMTelemetry()
-    budget = _Budget(settings.EXTRACTION_LLM_BUDGET_SECONDS)
+    use_llm = settings.EXTRACTION_USE_LLM
+    # Modelo desligado = orçamento zero: nenhuma unidade vai ao LLM e nada é tentado.
+    budget = _Budget(settings.EXTRACTION_LLM_BUDGET_SECONDS if use_llm else 0)
     llm = _TimedLLM(llm, budget, telemetry)
     page_lines, header_lines = blocks_mod.strip_boilerplate(pages)
     preface, blocks = blocks_mod.split_blocks(page_lines)
@@ -943,7 +966,16 @@ def analyze(
     rule_blocks = 0
     table_blocks = 0
     calls = _Calls()
-    unreadable_pages: list[int] = []
+    unreadable: dict[tuple[int, str], None] = {}  # (página, título) na ordem em que apareceram
+    if not use_llm:
+        # Sem modelo não há visão: página sem texto (escaneada ou em branco) não é lida. Se
+        # NENHUMA página tem texto, o laudo é uma imagem e só o modelo o leria; senão, cada
+        # página fica na lista de "não lidos" (dá para digitar ou dispensar).
+        blank = [p.number for p in pages if p.method == "vision" and not p.lines]
+        if pages and len(blank) == len(pages):
+            raise ExtractionError(ErrorCode.LLM_DISABLED)
+        for number in blank:
+            unreadable.setdefault((number, ""))
     last_error: ExtractionError | None = None
     done = 0
     drafts_by_plan: dict[int, list[dict]] = {}
@@ -975,8 +1007,7 @@ def analyze(
                     if not failed:
                         skipped_blocks += 1
                         failed = True
-                    if block.page not in unreadable_pages:
-                        unreadable_pages.append(block.page)
+                    unreadable.setdefault((block.page, unreadable_title(block)))
                     done += 1
                     report(done)
                     continue
@@ -992,8 +1023,7 @@ def analyze(
                     if not failed:
                         skipped_blocks += 1
                         failed = True
-                    if block.page not in unreadable_pages:
-                        unreadable_pages.append(block.page)
+                    unreadable.setdefault((block.page, unreadable_title(block)))
                     logger.warning(
                         "Bloco da página %s não pôde ser lido (%s)", block.page, exc.code
                     )
@@ -1033,9 +1063,10 @@ def analyze(
         # Nada foi lido porque os blocos falharam: o motivo real, não "sem resultados".
         raise last_error
     analysis.warnings.extend(
-        warning(WarningCode.BLOCK_UNREADABLE, page=page) for page in unreadable_pages
+        warning(WarningCode.BLOCK_UNREADABLE, page=page, **({"title": title} if title else {}))
+        for page, title in unreadable
     )
-    if skipped_units:
+    if skipped_units and use_llm:  # desligado de propósito não é "tempo esgotado"
         logger.warning("Tempo do LLM esgotado: %s parte(s) puladas", skipped_units)
         analysis.warnings.append(
             warning(WarningCode.LLM_BUDGET_EXCEEDED, seconds=int(budget.seconds))
@@ -1048,6 +1079,7 @@ def analyze(
         "rule_blocks": rule_blocks,
         "table_blocks": table_blocks,
         "llm_calls": calls.count,
+        "llm_enabled": use_llm,
         "llm_skipped_units": skipped_units,
         "llm_seconds": round(budget.spent, 1),
         "header_by_llm": header_by_llm,
@@ -1136,9 +1168,7 @@ def drop_superseded_previous(user, current_keys: set, exclude: ExamDocument | No
 def review_status_of_document(rows, warnings: list[dict]) -> str:
     """`needs_review` se sobra resultado atual a revisar ou aviso do laudo; senão `completed`."""
     pending = any(
-        r.review_status == ReviewStatus.NEEDS_REVIEW
-        for r in rows
-        if r.origin == ResultOrigin.CURRENT
+        r.review_status == ReviewStatus.NEEDS_REVIEW for r in rows if r.origin in CURRENT_ORIGINS
     )
     return DocumentStatus.NEEDS_REVIEW if pending or warnings else DocumentStatus.COMPLETED
 

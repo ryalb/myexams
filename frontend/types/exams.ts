@@ -3,6 +3,18 @@ export interface WarningItem {
   params?: Record<string, unknown>
 }
 
+// `title`: nome do exame como impresso (nunca valores); falta nos laudos importados antes dele.
+// (`type`, não `interface`: precisa ser atribuível a `Record<string, unknown>` de `WarningItem.params`.)
+export type BlockUnreadableParams = {
+  page: number
+  title?: string
+}
+
+export type UnreadBlock = {
+  code: 'block_unreadable'
+  params: BlockUnreadableParams
+}
+
 export interface Laboratory {
   id: number
   name: string
@@ -77,6 +89,18 @@ export interface ExamResult {
   source_line: string
 }
 
+// Corpo do POST /exam-results/ (resultado digitado). O servidor deriva todo o resto.
+export type ManualResultInput = {
+  document: number
+  name_raw: string
+  value_raw: string
+  unit_raw: string
+  reference_raw: string
+  analyte: number | null
+  collected_at: string | null
+  notes: string
+}
+
 export interface AnalyteOverview {
   slug: string
   name: string
@@ -135,6 +159,7 @@ export interface RunStats {
   blocks?: number
   rule_blocks?: number
   table_blocks?: number
+  llm_enabled?: boolean
   llm_calls?: number
   llm_seconds?: number
   llm_skipped_units?: number

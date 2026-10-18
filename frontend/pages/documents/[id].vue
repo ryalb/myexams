@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
-import type { AnalyteOption, ExamDocumentDetail, ExamResult, ExtractionRun } from '@/types/exams'
+import type { AnalyteOption, ExamDocument, ExamDocumentDetail, ExamResult, ExtractionRun, UnreadBlock } from '@/types/exams'
 
 definePageMeta({ middleware: 'auth' })
 const route = useRoute()
@@ -73,7 +73,8 @@ const onLaboratorySaved = (updated: ExamDocumentDetail) => {
   doc.value = updated
 }
 
-const current = computed(() => results.value.filter((r) => r.origin === 'current'))
+// "Do laudo": os lidos do PDF e os digitados pelo usuário (origem `manual`).
+const current = computed(() => results.value.filter((r) => r.origin === 'current' || r.origin === 'manual'))
 const previous = computed(() => results.value.filter((r) => r.origin === 'lab_previous'))
 const reviewOnly = ref(false)
 const rows = computed(() =>
@@ -136,6 +137,60 @@ async function removeDocument() {
   } finally {
     removing.value = false
   }
+}
+
+// Blocos não lidos têm painel próprio; os demais avisos do laudo seguem na lista geral.
+const otherWarnings = computed(() => (doc.value?.warnings ?? []).filter((w) => w.code !== 'block_unreadable'))
+const unreadCount = computed(() => (doc.value?.warnings ?? []).filter((w) => w.code === 'block_unreadable').length)
+const unreadPanel = ref<{ focus: () => void } | null>(null)
+const resultsHeading = ref<HTMLElement | null>(null)
+// O foco não pode sumir junto com o item que acabou de sair da tela.
+const refocusAfterChange = async () => {
+  await nextTick()
+  if (unreadCount.value) unreadPanel.value?.focus()
+  else resultsHeading.value?.focus()
+}
+
+// Inclusão manual (do painel, já com o nome do exame; ou avulsa, pelo botão acima da tabela).
+const manualOpen = ref(false)
+const manualName = ref('')
+const openManual = (name = '') => {
+  manualName.value = name
+  manualOpen.value = true
+}
+const addFromBlock = (block: UnreadBlock) => openManual(block.params.title ?? '')
+
+async function dismissBlock(block: UnreadBlock) {
+  const { page, title } = block.params
+  await run(async () => {
+    const updated = await post<ExamDocument>(`/exam-documents/${id}/dismiss-warning/`, {
+      code: block.code,
+      page,
+      ...(title ? { title } : {}),
+    })
+    // A resposta é o laudo sem `page_text`: só os campos novos entram.
+    if (updated && doc.value) doc.value = { ...doc.value, ...updated }
+  }, t('document.unreadableDismissed'))
+  await refocusAfterChange()
+}
+
+const manualSaved = async () => {
+  await refreshAll()
+}
+
+const removingManual = ref<ExamResult | null>(null)
+const removeManualVisible = computed({
+  get: () => removingManual.value !== null,
+  set: (open) => {
+    if (!open) removingManual.value = null
+  },
+})
+async function removeManual() {
+  const row = removingManual.value
+  if (!row) return
+  removingManual.value = null
+  await run(() => del(`/exam-results/${row.id}/`), t('document.manualDeleted'))
+  resultsHeading.value?.focus()
 }
 
 const valueLabel = (row: ExamResult) => row.value_raw || row.value_text || t('common.empty')
@@ -234,10 +289,18 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
       <p class="mt-1">{{ apiError.errorText(doc.error_code, doc.error_params) }}</p>
     </section>
 
-    <section v-if="doc.warnings.length" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+    <DocumentsUnreadBlocksPanel
+      ref="unreadPanel"
+      :warnings="doc.warnings"
+      :busy="acting || processing"
+      @add="addFromBlock"
+      @dismiss="dismissBlock"
+    />
+
+    <section v-if="otherWarnings.length" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
       <h2 class="font-semibold">{{ $t('document.warningsTitle') }}</h2>
       <ul class="mt-1 list-disc pl-5">
-        <li v-for="warning in doc.warnings" :key="warning.code">{{ apiError.warningText(warning) }}</li>
+        <li v-for="(warning, index) in otherWarnings" :key="`${warning.code}-${index}`">{{ apiError.warningText(warning) }}</li>
       </ul>
     </section>
 
@@ -270,11 +333,25 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
 
     <section class="overflow-hidden rounded-lg border border-sepia-200 bg-white shadow-sm">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-sepia-100 bg-sepia-50 px-4 py-2">
-        <h2 class="text-sm font-semibold text-sepia-800">{{ $t('document.resultsTitle') }}</h2>
-        <label class="flex items-center gap-2 text-xs text-sepia-700">
-          <input v-model="reviewOnly" type="checkbox" class="h-4 w-4 rounded border-sepia-300">
-          {{ $t('document.reviewOnly') }}
-        </label>
+        <h2 ref="resultsHeading" tabindex="-1" class="text-sm font-semibold text-sepia-800 outline-none">
+          {{ $t('document.resultsTitle') }}
+        </h2>
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="flex items-center gap-2 text-xs text-sepia-700">
+            <input v-model="reviewOnly" type="checkbox" class="h-4 w-4 rounded border-sepia-300">
+            {{ $t('document.reviewOnly') }}
+          </label>
+          <Button
+            type="button"
+            :disabled="processing"
+            :title="processing ? $t('document.laboratoryBusy') : undefined"
+            class="!rounded-md !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-sepia-50 hover:!bg-sepia-950 disabled:!opacity-50"
+            @click="openManual()"
+          >
+            <Icon icon="mdi:plus" class="h-4 w-4" />
+            {{ $t('document.addResult') }}
+          </Button>
+        </div>
       </div>
 
       <div class="overflow-x-auto">
@@ -299,7 +376,15 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
               :class="['align-top', row.review_status === 'needs_review' ? 'bg-amber-50/60' : 'hover:bg-sepia-50']"
             >
               <td class="px-4 py-3">
-                <p class="font-medium text-sepia-900">{{ row.name_raw }}</p>
+                <p class="font-medium text-sepia-900">
+                  {{ row.name_raw }}
+                  <span
+                    v-if="row.origin === 'manual'"
+                    class="ml-1 inline-flex items-center rounded-full bg-azul-50 px-2 py-0.5 text-[11px] font-medium text-azul-800 ring-1 ring-azul-200"
+                  >
+                    {{ $t('origin.manual') }}
+                  </span>
+                </p>
                 <NuxtLink
                   v-if="row.analyte_info"
                   :to="`/analytes/${row.analyte_info.slug}`"
@@ -353,6 +438,17 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
                 >
                   <Icon icon="mdi:pencil-outline" class="h-5 w-5" />
                 </button>
+                <button
+                  v-if="row.origin === 'manual'"
+                  type="button"
+                  class="rounded p-1 text-sepia-500 hover:bg-vermelho-50 hover:text-vermelho-700"
+                  :title="$t('document.manualDelete')"
+                  :aria-label="$t('document.manualDeleteFor', { name: row.name_raw })"
+                  :disabled="acting"
+                  @click="removingManual = row"
+                >
+                  <Icon icon="mdi:trash-can-outline" class="h-5 w-5" />
+                </button>
               </td>
             </tr>
           </tbody>
@@ -388,6 +484,36 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
     <DocumentsRunDiagnostics :runs="runs" :error="Boolean(runsError)" :loading="runsStatus === 'pending'" @retry="refreshRuns" />
 
     <ResultsEditResultDialog v-model:visible="editVisible" :result="editing" :analytes="analytes" @saved="refreshAll" />
+
+    <DocumentsManualResultDialog
+      v-model:visible="manualOpen"
+      :document-id="doc.id"
+      :default-date="doc.collected_on"
+      :initial-name="manualName"
+      :analytes="analytes"
+      @saved="manualSaved"
+    />
+
+    <Dialog v-model:visible="removeManualVisible" modal :header="$t('document.manualDelete')" class="w-[28rem] max-w-[95vw]">
+      <p class="text-sm text-sepia-700">{{ $t('document.manualDeleteBody', { name: removingManual?.name_raw ?? '' }) }}</p>
+      <div class="mt-6 flex justify-end gap-2">
+        <Button
+          type="button"
+          class="!rounded-md !border !border-sepia-300 !bg-white !px-4 !py-2 !text-sm !text-sepia-800 hover:!bg-sepia-50"
+          @click="removingManual = null"
+        >
+          {{ $t('common.cancel') }}
+        </Button>
+        <Button
+          type="button"
+          :disabled="acting"
+          class="!rounded-md !bg-vermelho-600 !px-4 !py-2 !text-sm !font-medium !text-white hover:!bg-vermelho-700 disabled:!opacity-50"
+          @click="removeManual"
+        >
+          {{ $t('common.delete') }}
+        </Button>
+      </div>
+    </Dialog>
 
     <Dialog v-model:visible="deleting" modal :header="$t('document.deleteTitle')" class="w-[28rem] max-w-[95vw]">
       <p class="text-sm text-sepia-700">{{ $t('document.deleteBody') }}</p>

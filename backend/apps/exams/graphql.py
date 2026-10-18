@@ -3,7 +3,7 @@ from django.db.models import Count, Q
 from graphene_django import DjangoObjectType
 
 from .history import build_analyte_history, build_overview
-from .models import Analyte, ExamDocument, ResultOrigin, ReviewStatus
+from .models import CURRENT_ORIGINS, Analyte, ExamDocument, ReviewStatus
 
 MAX_DOCUMENTS = 500
 
@@ -82,7 +82,7 @@ class AnalyteHistoryType(graphene.ObjectType):
 
 def _documents_with_counts(user):
     """Contagens por anotação (uma query), sem N+1 nos resolvers de campo."""
-    current = Q(results__origin=ResultOrigin.CURRENT)
+    current = Q(results__origin__in=CURRENT_ORIGINS)
     return (
         ExamDocument.objects.filter(user=user)
         .select_related("laboratory")

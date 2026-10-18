@@ -1,10 +1,17 @@
+import re
+from datetime import datetime, time
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils.dateparse import parse_date
 from rest_framework import serializers
 
 from .codes import ErrorCode
 from .errors import CodedAPIError
+from .extraction.numbers import parse_number
+from .extraction.softlab_lines import is_plain_value, is_qualitative_text
 from .models import (
     Analyte,
     ExamDocument,
@@ -256,3 +263,80 @@ class ExamResultSerializer(serializers.ModelSerializer):
         if value not in EDITABLE_REVIEW:
             raise serializers.ValidationError("invalid")
         return value
+
+
+# Cabe nas colunas DecimalField(20, 6) do banco (14 dígitos inteiros).
+MAX_ABS_DECIMAL = Decimal(10) ** 14
+_DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+class DateOrDateTimeField(serializers.DateTimeField):
+    """Data (`2026-08-25`, vira meia-noite local) ou data e hora ISO."""
+
+    def to_internal_value(self, value):
+        if isinstance(value, str) and _DATE_ONLY.fullmatch(value.strip()):
+            day = parse_date(value.strip())
+            if day is not None:
+                return self.enforce_timezone(datetime.combine(day, time.min))
+        return super().to_internal_value(value)
+
+
+def _collapse(value: str) -> str:
+    return " ".join(value.split())
+
+
+class ManualResultSerializer(serializers.Serializer):
+    """Entrada do POST /exam-results/: só o que o usuário digita.
+
+    Tudo que é derivado (número, unidade canônica, faixa, sinalização, avisos) o servidor
+    calcula com as funções da importação. Erros de campo são códigos (`errors.<código>`).
+    """
+
+    document = UserScopedPrimaryKeyRelatedField(
+        queryset=ExamDocument.objects.all(), user_path="user"
+    )
+    analyte = serializers.PrimaryKeyRelatedField(
+        queryset=Analyte.objects.all(), required=False, allow_null=True
+    )
+    name_raw = serializers.CharField(
+        max_length=255, required=False, allow_blank=True, trim_whitespace=False, default=""
+    )
+    value_raw = serializers.CharField(
+        max_length=255, required=False, allow_blank=True, trim_whitespace=False, default=""
+    )
+    unit_raw = serializers.CharField(max_length=60, required=False, allow_blank=True, default="")
+    reference_raw = serializers.CharField(
+        max_length=4000, required=False, allow_blank=True, default=""
+    )
+    collected_at = DateOrDateTimeField(required=False, allow_null=True)
+    notes = serializers.CharField(max_length=4000, required=False, allow_blank=True, default="")
+
+    def validate_name_raw(self, value: str) -> str:
+        name = _collapse(value)
+        if not name:
+            raise serializers.ValidationError(ErrorCode.RESULT_NAME_REQUIRED.value)
+        return name
+
+    def validate_value_raw(self, value: str) -> str:
+        text = _collapse(value)
+        if not text:
+            raise serializers.ValidationError(ErrorCode.RESULT_VALUE_REQUIRED.value)
+        # Número (vírgula ou ponto, com `<`/`>` opcional) ou o vocabulário qualitativo fechado
+        # do laudo (Negativo, Positivo, Reagente...). Unidade vai no campo próprio.
+        if not (is_plain_value(text) or is_qualitative_text(text)):
+            raise serializers.ValidationError(ErrorCode.RESULT_VALUE_INVALID.value)
+        parsed = parse_number(text)
+        if parsed.value is not None and abs(parsed.value) >= MAX_ABS_DECIMAL:
+            raise serializers.ValidationError(ErrorCode.RESULT_VALUE_INVALID.value)
+        return text
+
+    def validate_unit_raw(self, value: str) -> str:
+        return _collapse(value)
+
+
+class DismissWarningSerializer(serializers.Serializer):
+    """Entrada de POST /exam-documents/<id>/dismiss-warning/ (`title`: opcional, laudos antigos)."""
+
+    code = serializers.CharField(max_length=50)
+    page = serializers.IntegerField(min_value=1, max_value=100000)
+    title = serializers.CharField(max_length=255, required=False, allow_blank=True)

@@ -13,7 +13,15 @@ export function useAuth() {
 
   const isAuthenticated = computed(() => !!accessToken.value)
 
+  // O usuário em memória (nome, papel) é de quem estava logado: nunca atravessa um login/logout.
+  const forgetCurrentUser = () => {
+    nuxtApp.runWithContext(() => {
+      useState('current-user').value = null
+    })
+  }
+
   const login = async (username: string, password: string) => {
+    forgetCurrentUser()
     const data = await $fetch<{ access: string; refresh: string }>(
       `${config.public.apiBaseUrl}/auth/token/`,
       {
@@ -35,6 +43,13 @@ export function useAuth() {
     // seguir na mesma sessão da SPA. `runWithContext`: logout também roda em
     // callbacks assíncronos, onde o contexto do Nuxt já se perdeu.
     nuxtApp.runWithContext(() => clearNuxtData())
+    forgetCurrentUser()
+  }
+
+  // Trocar a própria senha invalida os tokens antigos: o backend devolve um par novo.
+  const setTokens = (tokens: { access: string; refresh: string }) => {
+    accessToken.value = tokens.access
+    refreshToken.value = tokens.refresh
   }
 
   const refresh = (): Promise<boolean> => {
@@ -74,5 +89,6 @@ export function useAuth() {
     login,
     logout,
     refresh,
+    setTokens,
   }
 }

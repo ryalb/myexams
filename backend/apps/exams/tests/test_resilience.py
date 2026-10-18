@@ -7,9 +7,10 @@ import pytest
 
 from apps.exams import tasks
 from apps.exams.codes import ErrorCode, WarningCode
+from apps.exams.extraction.blocks import Block
 from apps.exams.extraction.errors import ExtractionError
 from apps.exams.extraction.fakes import FakeLLMClient
-from apps.exams.extraction.pipeline import process_document
+from apps.exams.extraction.pipeline import process_document, unreadable_title
 from apps.exams.models import DocumentStatus, ReviewStatus
 from apps.exams.serializers import ExamDocumentDetailSerializer, ExamDocumentSerializer
 
@@ -93,8 +94,11 @@ def test_block_that_keeps_timing_out_is_skipped_with_a_warning(monkeypatch, user
     assert not document.results.filter(name_raw="Hemácias").exists()
     assert document.results.filter(name_raw="GLICOSE").exists()  # o resto do laudo foi salvo
     assert document.results.filter(name_raw="TESTOSTERONA LIVRE CALCULADA").exists()
-    # Aviso do laudo, só com a página (nunca nome nem valor de exame). O hemograma é a página 1.
-    assert {"code": "block_unreadable", "params": {"page": 1}} in document.warnings
+    # Aviso do laudo: página + nome impresso do exame (nunca valores). O hemograma é a página 1.
+    assert {
+        "code": "block_unreadable",
+        "params": {"page": 1, "title": "HEMOGRAMA"},
+    } in document.warnings
     assert document.status == DocumentStatus.NEEDS_REVIEW
     run_ = document.runs.get()
     assert run_.status == "success"
@@ -127,20 +131,59 @@ def test_invalid_model_output_skips_the_block_without_pipeline_retry(monkeypatch
 
     # O cliente já tenta duas vezes internamente; o pipeline não repete.
     assert calls_for(llm, "HEMOGRAMA") == 1
-    assert {"code": "block_unreadable", "params": {"page": 1}} in document.warnings
+    assert {
+        "code": "block_unreadable",
+        "params": {"page": 1, "title": "HEMOGRAMA"},
+    } in document.warnings
     assert not document.results.filter(name_raw="Hemácias").exists()
     assert document.results.filter(name_raw="CREATININA").exists()  # regras não dependem do LLM
     assert document.status == DocumentStatus.NEEDS_REVIEW
 
 
-def test_two_unreadable_blocks_on_the_same_page_give_one_warning(monkeypatch, user, tmp_path):
+def test_two_unreadable_blocks_on_the_same_page_give_one_warning_each(monkeypatch, user, tmp_path):
     pdf = qualitative_pdf(tmp_path, "NITRITO", "UROBILINOGÊNIO", "BILIRRUBINA")
     prefixes = {"NITRITO": timeout(), "UROBILINOGÊNIO": timeout()}
     document, _ = run(monkeypatch, user, pdf, failing(prefixes, base=qualitative_llm_results))
     unreadable = [w for w in document.warnings if w["code"] == WarningCode.BLOCK_UNREADABLE]
-    assert unreadable == [{"code": "block_unreadable", "params": {"page": 1}}]
+    assert unreadable == [
+        {"code": "block_unreadable", "params": {"page": 1, "title": "NITRITO"}},
+        {"code": "block_unreadable", "params": {"page": 1, "title": "UROBILINOGÊNIO"}},
+    ]
     assert document.runs.get().stats["skipped_blocks"] == 2
     assert document.results.filter(name_raw="BILIRRUBINA").exists()
+
+
+def test_unreadable_warning_carries_only_page_and_exam_name_never_the_value(
+    monkeypatch, user, tmp_path
+):
+    pdf = qualitative_pdf(tmp_path, "NITRITO", "BILIRRUBINA")
+    results = failing({"NITRITO": timeout()}, base=qualitative_llm_results)
+    document, _ = run(monkeypatch, user, pdf, results)
+
+    (unreadable,) = (w for w in document.warnings if w["code"] == WarningCode.BLOCK_UNREADABLE)
+    assert unreadable["params"] == {"page": 1, "title": "NITRITO"}
+    assert "Negativo" not in str(document.warnings)
+
+
+@pytest.mark.parametrize(
+    ("block", "expected"),
+    [
+        # Título com valor e material: só o nome impresso do exame.
+        (Block("NITRITO | Negativo", ["NITRITO | Negativo", "Material: urina"], 1), "NITRITO"),
+        (Block("COLESTEROL TOTAL, soro", ["COLESTEROL TOTAL, soro"], 1), "COLESTEROL TOTAL"),
+        (Block("CREATININA: 1,20 mg/dL", ["CREATININA: 1,20 mg/dL"], 1), "CREATININA"),
+        # Sem título: primeira linha não vazia (também sem o que vem depois de `|`).
+        (
+            Block("", ["", "  Tempo   de Protrombina | 12,0 s", "Material: soro"], 2),
+            "Tempo de Protrombina",
+        ),
+        # No máximo 80 caracteres.
+        (Block("X" * 200, ["X" * 200], 1), "X" * 80),
+        (Block("", [], 1), ""),
+    ],
+)
+def test_unreadable_title_is_the_printed_exam_name_only(block, expected):
+    assert unreadable_title(block) == expected
 
 
 @pytest.mark.parametrize(

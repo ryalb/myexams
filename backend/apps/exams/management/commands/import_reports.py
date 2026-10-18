@@ -16,8 +16,11 @@ Garantias:
 """
 
 import csv
+import fnmatch
 import hashlib
+import json
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +30,9 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.exams import tasks
 from apps.exams.codes import ErrorCode
+from apps.exams.extraction.pipeline import find_accession_clash, laboratory_for
 from apps.exams.models import DocumentStatus, ExamDocument, ReviewStatus
+from apps.exams.offline import offline_settings
 from apps.exams.storage import PDF_MAGIC, delete_upload, save_upload
 
 CHUNK = 1024 * 1024
@@ -73,6 +78,26 @@ def chunks_of(path: Path):
         yield from iter(lambda: handle.read(CHUNK), b"")
 
 
+def load_laboratory_map(path: Path) -> list[tuple[str, str]]:
+    """Lê `{"padrão do nome do arquivo": "Nome do laboratório"}` (JSON), na ordem do arquivo.
+
+    Serve para o que o texto do PDF não diz (o nome só está no logotipo). Os padrões são `fnmatch`
+    sem diferenciar maiúsculas, aplicados ao NOME do arquivo.
+    """
+    try:
+        data = json.loads(path.expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise CommandError(f"Não consegui ler o mapa de laboratórios {path}: {exc}") from exc
+    if not isinstance(data, dict) or not data:
+        raise CommandError("O mapa de laboratórios deve ser um objeto JSON {padrão: nome}.")
+    pairs = []
+    for pattern, name in data.items():
+        if not isinstance(pattern, str) or not isinstance(name, str) or not name.strip():
+            raise CommandError(f"Entrada inválida no mapa de laboratórios: {pattern!r}.")
+        pairs.append((pattern.lower(), " ".join(name.split())[:255]))
+    return pairs
+
+
 def resolve_user(email: str | None):
     """Dono dos laudos: por e-mail/usuário, ou o único usuário ativo. Compartilhado com
     `export_reports` e `import_json`."""
@@ -106,33 +131,48 @@ class Command(BaseCommand):
         )
         parser.add_argument("--dry-run", action="store_true", help="Só lista o que seria feito.")
         parser.add_argument("--report", type=Path, help="Grava um resumo em CSV.")
+        parser.add_argument(
+            "--laboratory-map",
+            type=Path,
+            help="JSON {padrão do nome do arquivo: nome do laboratório}. Só preenche o laudo "
+            "cujo laboratório o texto do PDF não revelou (nunca troca um nome já detectado).",
+        )
 
     # --- execução -------------------------------------------------------------------------
 
     def handle(self, *args, **options):
         user = self._user(options["email"])
+        self.laboratory_map = (
+            load_laboratory_map(options["laboratory_map"]) if options["laboratory_map"] else []
+        )
+        self.laboratories_filled = 0
         files = find_pdfs(options["paths"], options["recursive"])
         if options["limit"] > 0:
             files = files[: options["limit"]]
         if not files:
             raise CommandError("Nenhum PDF encontrado.")
 
-        if not options["dry_run"]:
-            self._prepare_offline(options["no_llm"])
+        # Eventos em tempo real (WebSocket) não fazem sentido aqui e exigiriam o Redis ligado;
+        # `--no-llm` desliga o modelo só durante este comando (override, nada vaza).
+        offline = (
+            nullcontext() if options["dry_run"] else offline_settings(use_llm=not options["no_llm"])
+        )
+        rules_only = options["no_llm"] or not settings.EXTRACTION_USE_LLM
 
         self.stdout.write(
             f"{len(files)} arquivo(s) para {user.get_username()}"
             + (" (simulação)" if options["dry_run"] else "")
-            + (" — só regras, sem modelo" if options["no_llm"] else "")
+            + (" — só regras, sem modelo" if rules_only else "")
         )
 
         outcomes: list[Outcome] = []
         started = time.monotonic()
         try:
-            for index, path in enumerate(files, start=1):
-                outcome = self._one(user, path, dry_run=options["dry_run"])
-                outcomes.append(outcome)
-                self.stdout.write(f"[{index}/{len(files)}] {self._line(outcome)}")
+            with offline:
+                for index, path in enumerate(files, start=1):
+                    outcome = self._one(user, path, dry_run=options["dry_run"])
+                    outcomes.append(outcome)
+                    self.stdout.write(f"[{index}/{len(files)}] {self._line(outcome)}")
         except KeyboardInterrupt:
             self.stdout.write(
                 self.style.WARNING("\nInterrompido. Rode de novo: o que já foi importado é pulado.")
@@ -144,12 +184,6 @@ class Command(BaseCommand):
 
     def _user(self, email: str | None):
         return resolve_user(email)
-
-    def _prepare_offline(self, no_llm: bool) -> None:
-        # Eventos em tempo real (WebSocket) não fazem sentido aqui e exigiriam o Redis ligado.
-        settings.CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
-        if no_llm:
-            settings.EXTRACTION_LLM_BUDGET_SECONDS = 0  # o pipeline pula toda unidade de LLM
 
     def _one(self, user, path: Path, *, dry_run: bool) -> Outcome:
         name = path.name
@@ -192,6 +226,8 @@ class Command(BaseCommand):
             document.delete()  # o mesmo pedido já está no banco: não deixa um laudo falho na lista
             return Outcome(name, "skipped_duplicate", ErrorCode.DUPLICATE_DOCUMENT, seconds=elapsed)
 
+        self._apply_laboratory_map(document, name)
+
         run = document.runs.first()
         stats = (run.stats if run else {}) or {}
         return Outcome(
@@ -203,6 +239,23 @@ class Command(BaseCommand):
             seconds=elapsed,
             llm_calls=int(stats.get("llm_calls", 0) or 0),
         )
+
+    def _apply_laboratory_map(self, document: ExamDocument, filename: str) -> None:
+        """Dá o laboratório do mapa ao laudo que ficou sem nome (sem trocar o que foi detectado)."""
+        if document.laboratory_id is not None or document.status == DocumentStatus.FAILED:
+            return
+        lowered = filename.lower()
+        name = next(
+            (n for pattern, n in self.laboratory_map if fnmatch.fnmatch(lowered, pattern)), ""
+        )
+        if not name:
+            return
+        laboratory = laboratory_for(name)
+        if find_accession_clash(document.user, laboratory, document.accession_number, document):
+            return
+        document.laboratory = laboratory
+        document.save(update_fields=["laboratory", "updated_at"])
+        self.laboratories_filled += 1
 
     # --- saída ----------------------------------------------------------------------------
 
@@ -240,6 +293,8 @@ class Command(BaseCommand):
         self.stdout.write(f"  pulados (inválidos):  {count('skipped_invalid')}")
         if count("dry_run"):
             self.stdout.write(f"  seriam importados:    {count('dry_run')}")
+        if self.laboratory_map:
+            self.stdout.write(f"  laboratório pelo mapa: {self.laboratories_filled}")
         failed = [o for o in outcomes if o.status == DocumentStatus.FAILED]
         if failed:
             self.stdout.write(

@@ -284,6 +284,20 @@ def test_confirm_clears_warnings_and_completes_document(api, processed):
     assert not processed.results.filter(review_status=ReviewStatus.NEEDS_REVIEW).exists()
 
 
+def test_confirm_keeps_unread_block_warnings_but_clears_the_rest(api, processed):
+    processed.warnings = [
+        {"code": "block_unreadable", "params": {"page": 3, "title": "EXAME EXEMPLO"}},
+        {"code": "patient_mismatch", "params": {}},
+    ]
+    processed.save(update_fields=["warnings"])
+
+    response = api.post(f"/api/v1/exam-documents/{processed.pk}/confirm/")
+
+    assert response.status_code == 200
+    assert [w["code"] for w in response.json()["warnings"]] == ["block_unreadable"]
+    assert response.json()["warnings"][0]["params"]["title"] == "EXAME EXEMPLO"
+
+
 def test_reprocess_is_blocked_after_user_edits(
     api, processed, enqueued, django_capture_on_commit_callbacks
 ):

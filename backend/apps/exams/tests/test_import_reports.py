@@ -132,9 +132,13 @@ def test_no_llm_never_calls_the_model_and_flags_what_needs_it(user, tmp_path, fa
     assert fake_llm.header_calls == []
     document = ExamDocument.objects.get()
     assert document.status == DocumentStatus.NEEDS_REVIEW
-    assert "llm_budget_exceeded" in {w["code"] for w in document.warnings}
+    codes = {w["code"] for w in document.warnings}
+    assert "block_unreadable" in codes
+    assert "llm_budget_exceeded" not in codes  # desligado de propósito não é "tempo esgotado"
     assert document.results.filter(name_raw="GLICOSE").exists()  # o que as regras leem entra
     assert "0 chamadas ao modelo" in output
+    assert "só regras, sem modelo" in output
+    assert settings.EXTRACTION_USE_LLM is True  # `--no-llm` vale só durante o comando
 
 
 def test_report_csv_has_one_row_per_file_without_exam_values(user, tmp_path):
@@ -195,3 +199,89 @@ def test_accepts_individual_files_and_deduplicates_repeated_paths(user, tmp_path
     pdf = make_pdf(tmp_path, "a.pdf", "021-00001-001")
     run(str(pdf), str(tmp_path), "--email", user.email)  # o mesmo arquivo por dois caminhos
     assert ExamDocument.objects.count() == 1
+
+
+# --- --laboratory-map: nome que só está no logotipo -------------------------------------------
+
+
+@pytest.fixture
+def nothing_detected(monkeypatch):
+    """O texto dos PDFs sintéticos traz um site; aqui o laboratório não é detectado."""
+    monkeypatch.setattr(
+        "apps.exams.extraction.pipeline.laboratory_from_text", lambda *args, **kwargs: ""
+    )
+
+
+def write_map(tmp_path: Path, content: str) -> str:
+    path = tmp_path / "laboratories.json"
+    path.write_text(content, encoding="utf-8")
+    return str(path)
+
+
+def test_laboratory_map_fills_documents_without_a_detected_laboratory(
+    user, tmp_path, nothing_detected
+):
+    make_pdf(tmp_path / "laudos", "a.pdf", "021-00001-001")
+    make_pdf(tmp_path / "laudos", "b.pdf", "021-00002-002")
+    # o primeiro padrão que casa vence; maiúsculas não importam
+    mapping = write_map(tmp_path, '{"A*.PDF": "Lab do Logotipo", "*.pdf": "Outro Lab"}')
+
+    output = run(str(tmp_path / "laudos"), "--email", user.email, "--laboratory-map", mapping)
+
+    names = {d.original_filename: d.laboratory.name for d in ExamDocument.objects.all()}
+    assert names == {"a.pdf": "Lab do Logotipo", "b.pdf": "Outro Lab"}
+    assert "laboratório pelo mapa: 2" in output
+
+
+def test_laboratory_map_never_replaces_a_detected_name(user, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "apps.exams.extraction.pipeline.laboratory_from_text", lambda *args, **kwargs: "Detectado"
+    )
+    make_pdf(tmp_path / "laudos", "a.pdf", "021-00001-001")
+    mapping = write_map(tmp_path, '{"*.pdf": "Do Mapa"}')
+
+    output = run(str(tmp_path / "laudos"), "--email", user.email, "--laboratory-map", mapping)
+
+    assert ExamDocument.objects.get().laboratory.name == "Detectado"
+    assert "laboratório pelo mapa: 0" in output
+
+
+def test_laboratory_map_is_skipped_for_files_no_pattern_matches(user, tmp_path, nothing_detected):
+    make_pdf(tmp_path / "laudos", "a.pdf", "021-00001-001")
+    mapping = write_map(tmp_path, '{"outro-*.pdf": "Não casa"}')
+
+    run(str(tmp_path / "laudos"), "--email", user.email, "--laboratory-map", mapping)
+
+    assert ExamDocument.objects.get().laboratory is None
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["não é json", "[]", "{}", '{"*.pdf": ""}', '{"*.pdf": 3}'],
+)
+def test_invalid_laboratory_map_is_rejected_before_importing_anything(user, tmp_path, content):
+    make_pdf(tmp_path / "laudos", "a.pdf", "021-00001-001")
+
+    with pytest.raises(CommandError, match="laboratórios|Entrada inválida"):
+        run(
+            str(tmp_path / "laudos"),
+            "--email",
+            user.email,
+            "--laboratory-map",
+            write_map(tmp_path, content),
+        )
+
+    assert not ExamDocument.objects.exists()
+
+
+def test_missing_laboratory_map_file_is_an_error(user, tmp_path):
+    make_pdf(tmp_path / "laudos", "a.pdf", "021-00001-001")
+
+    with pytest.raises(CommandError, match="Não consegui ler"):
+        run(
+            str(tmp_path / "laudos"),
+            "--email",
+            user.email,
+            "--laboratory-map",
+            str(tmp_path / "nao-existe.json"),
+        )

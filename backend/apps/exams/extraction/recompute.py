@@ -4,19 +4,22 @@ from datetime import date
 
 from django.utils import timezone
 
+from ..codes import WarningCode
 from ..models import ExamResult, ResultFlag
 from .analytes import AnalyteResolver
 from .dates import age_on
-from .flags import compute_flag, compute_qualitative_flag
-from .numbers import parse_number
+from .flags import compute_flag, compute_qualitative_flag, printed_flag_direction
+from .numbers import ParsedNumber, parse_number
 from .pipeline import _is_integer_count_unit, band_kind
 from .reference import applicable_bands, interpretation_for, normal_band, parse_reference
 from .units import convert, normalize_unit
+from .validate import is_implausible, warning
 
 
 def recompute_result(
     result: ExamResult, *, sex: str | None, birth_date: date | None, resolver: AnalyteResolver
-) -> None:
+) -> ParsedNumber:
+    """Preenche os campos derivados a partir das entradas; devolve a leitura do número."""
     analyte = result.analyte
     result.unit = normalize_unit(result.unit_raw) or result.unit
     plausible = None
@@ -63,3 +66,38 @@ def recompute_result(
     else:
         result.flag = compute_qualitative_flag(result.value_text, selected) or ResultFlag.UNKNOWN
         result.interpretation = ""
+    return parsed
+
+
+def rederived_warnings(result: ExamResult, previous: list[dict]) -> list[dict]:
+    """Avisos de uma linha recalculada: só o que dá para saber sem o texto do laudo."""
+    analyte = result.analyte
+    warnings = [w for w in previous if w["code"] == WarningCode.PAGE_READ_BY_VISION]
+    if analyte is None:
+        warnings.append(warning(WarningCode.UNMAPPED_ANALYTE))
+    if not result.value_raw.strip():
+        warnings.append(warning(WarningCode.VALUE_MISSING))
+    if result.value_numeric is not None:
+        if analyte and analyte.canonical_unit:
+            if not result.unit:
+                warnings.append(warning(WarningCode.UNIT_MISSING))
+            elif result.value_canonical is None:
+                warnings.append(warning(WarningCode.UNIT_NOT_CONVERTIBLE, unit=result.unit))
+        elif not result.unit:
+            warnings.append(warning(WarningCode.UNIT_MISSING))
+        if is_implausible(
+            result.value_canonical,
+            analyte.plausible_min if analyte else None,
+            analyte.plausible_max if analyte else None,
+        ):
+            warnings.append(warning(WarningCode.IMPLAUSIBLE_VALUE))
+    if result.reference_raw and not result.ref_bands:
+        warnings.append(warning(WarningCode.REFERENCE_NOT_PARSED))
+    direction = printed_flag_direction(result.flag_printed)
+    if (
+        direction
+        and result.flag in (ResultFlag.LOW, ResultFlag.HIGH, ResultFlag.NORMAL)
+        and direction != result.flag
+    ):
+        warnings.append(warning(WarningCode.FLAG_MISMATCH))
+    return warnings

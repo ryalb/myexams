@@ -137,8 +137,14 @@ andamento por WebSocket.
 | `ollama-pull` | Baixa os modelos do Ollama usados pela extração |
 | `ollama-log` | Acompanha o log do Ollama só com o útil: requisições (quem está usando), tokens/s, carga de modelos e erros. `mise run ollama-log -- 40` mostra as últimas 40 linhas antes de acompanhar |
 | `import-reports` | Importa PDFs de laudos em lote, offline (ver "Importar laudos antigos em lote") |
+| `db-fresh` | Tudo de uma vez: `db-backup`, apaga o banco mantendo as contas, migra e recarrega os laudos de `fixtures/private/` (só regras). É o atalho para "começar do zero com meus dados" |
+| `reload-reports` | Recarrega os laudos de `fixtures/private/` (só regras) e dá o nome do laboratório pelos padrões de `fixtures/private/laboratories.json` quando o texto do PDF não o revela. Rode depois de `db-reset` (que deixa o banco vazio) |
 | `export-reports` | Passo 1 da carga única: PDFs -> JSON revisável, sem tocar no banco (ver "Carga única em duas etapas") |
 | `import-json` | Passo 2 da carga única: carrega no banco o JSON revisado |
+| `backfill-warnings` | Atualiza só os avisos de laudos já importados (nome do exame nos blocos não lidos), relendo os PDFs (ver "Atualizar os avisos de laudos já importados") |
+| `db-backup` | Backup do banco (`pg_dump`, formato custom) em `fixtures/private/db-backups/`, fora do git e com permissão 0600; confere que o arquivo é restaurável |
+| `db-reset` | Faz o `db-backup`, **apaga o banco local** e roda as migrations do zero (re-sincroniza o catálogo). Só roda em banco local. `mise run db-reset -- --yes --keep-users` mantém as contas e os perfis (mesmas senhas); sem `--yes`, pede para digitar o nome do banco |
+| `make-admin` | Concede o papel de administrador do app a uma conta existente (`mise run make-admin -- voce@email.com`; `--revoke` retira). Ver "Administração de usuários" |
 | `kill-port <porta>` | Mata processos numa porta |
 
 Hooks de commit:
@@ -147,6 +153,32 @@ Hooks de commit:
 uv tool run prek install
 uv tool run prek run --all-files
 ```
+
+## Administração de usuários
+
+O cadastro público fica desligado; as contas da família são criadas por um **administrador do app**. O papel
+(`Profile.is_admin`) é independente de `is_staff`/`is_superuser` do Django (que abrem o `/admin/` do Django e continuam
+como estão).
+
+1. **Primeiro administrador.** Com a conta já criada (ver "Criar um usuário"), rode
+   `mise run make-admin -- voce@exemplo.com`. É idempotente e imprime só o e-mail e o papel; `--revoke` retira o papel.
+2. **Criar as demais contas.** Quem é administrador vê **Usuários** no menu (`/admin/users`) e usa **Novo usuário**
+   (nome, e-mail, papel e, opcionalmente, senha). Sem senha digitada, o servidor gera uma **senha temporária**
+   (16 caracteres, sem caracteres ambíguos) e a mostra **uma única vez** na tela, com botão de copiar. Ela nunca é
+   guardada em claro nem vai para o log. A conta nasce marcada para **trocar a senha no primeiro acesso**: o app leva a
+   pessoa direto ao bloco "Trocar senha" do perfil até ela trocar.
+3. **Senha esquecida.** O botão de redefinir senha gera outra senha temporária (também mostrada uma vez) e invalida as
+   sessões anteriores daquela conta.
+4. **Desativar, não excluir.** Uma conta desativada não entra, não renova nem usa tokens que já tinha, mas seus exames
+   continuam guardados e ela pode ser reativada. **Não existe exclusão de conta** na API nem na tela, de propósito:
+   excluir um usuário apagaria os exames dele. O administrador não desativa nem rebaixa a si mesmo, e o último
+   administrador ativo nunca perde o papel.
+
+Privacidade: o administrador do app **não vê os exames de outras pessoas**. As rotas de administração só devolvem dados da
+conta (nome, e-mail, papel, situação, datas de criação e do último acesso), sem contagem nem conteúdo de laudos, e as
+rotas de laudos, resultados, histórico e GraphQL continuam filtrando por quem está logado (um administrador recebe `404`
+no laudo de outro). Quem tem acesso ao servidor, ao banco ou ao `/admin/` do Django com um superusuário é outra
+história: o papel de administrador do app não muda isso.
 
 ## Privacidade
 
@@ -180,6 +212,12 @@ Laudo é dado de saúde. As decisões abaixo existem para que ele não vaze:
 
 ## Pipeline de extração
 
+> **Só regras, sem modelo:** `EXTRACTION_USE_LLM=false` em `backend/.env` (e reinicie o worker).
+> O worker não fala mais com o Ollama: as regras leem o que reconhecem, o resto aparece em
+> "Blocos não lidos" para você digitar, e um PDF só de imagem (escaneado) falha com a mensagem
+> `llm_disabled`. Com `true` (padrão do código) o modelo volta a ser o plano B dos blocos que as
+> regras não leem, como descrito abaixo.
+
 Resumo (diagrama completo em [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)):
 
 1. **Upload** (`POST /api/v1/exam-documents/`, `202`): valida tamanho, assinatura `%PDF-`,
@@ -204,7 +242,8 @@ Resumo (diagrama completo em [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)):
    valor, unidade e referência **como impressos**. As regras rodam antes do modelo e as
    chamadas ao modelo têm um **orçamento de tempo** por laudo
    (`EXTRACTION_LLM_BUDGET_SECONDS`, padrão 240 s): estourado o teto, as partes restantes são
-   puladas e o laudo sai com os avisos `block_unreadable` (por página) e `llm_budget_exceeded`.
+   puladas e o laudo sai com os avisos `block_unreadable` (um por bloco, com `page` e `title` = nome do exame como
+   impresso, nunca valores) e `llm_budget_exceeded`.
    O **cabeçalho** (paciente, nº do pedido, datas, solicitante) é lido primeiro por regex; o
    LLM só é consultado quando o regex acha menos de 3 dos 5 campos. `ExtractionRun.stats`
    guarda `rule_blocks` (blocos lidos por regras), `table_blocks` (dos quais, tabelas),
@@ -228,6 +267,12 @@ Resumo (diagrama completo em [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)):
 **Reprocessar** (`POST /api/v1/exam-documents/{id}/reprocess/`) refaz a análise a partir
 de `page_text`, sem o PDF. É recusado (`409`) se o laudo não tem texto salvo, está em
 andamento ou já tem resultado confirmado/corrigido pelo usuário.
+
+**Blocos não lidos e resultados manuais.** Cada bloco que a leitura não conseguiu ler vira um aviso
+`block_unreadable` com `page` e `title`. A tela do laudo lista esses blocos ("Blocos não lidos") e deixa digitar o
+resultado (`POST /exam-results/`, origem `manual`) ou marcar o bloco como resolvido. O número, a unidade canônica, a
+faixa, a sinalização e os avisos de um resultado manual saem do mesmo código determinístico da importação; só os
+resultados manuais podem ser apagados.
 
 Se o usuário corrige um resultado (`PATCH /exam-results/{id}/`), o backend recalcula
 número, canônico, faixa e sinalização sem LLM e, se ele trocou o exame, grava um apelido
@@ -275,7 +320,12 @@ Prefixo `/api/v1/`. Tudo exige `Authorization: Bearer <access>`, exceto `health/
 | `POST auth/token/` | Login: `{username, password}` -> `{access, refresh}` (limite `login`: 10/h) |
 | `POST auth/token/refresh/` | Renova o access token |
 | `POST auth/register/` | Cria usuário. `404` com registro desligado |
-| `GET auth/me/` | Usuário autenticado + perfil + URL do avatar |
+| `GET auth/me/` | Usuário autenticado + `is_admin` + `must_change_password` + perfil |
+| `POST auth/change-password/` | Troca a própria senha: `{current_password, new_password}` -> `{access, refresh}` novos (os tokens antigos deixam de valer). Erros: `current_password_incorrect` (400) e, no campo `new_password`, `password_too_short`, `password_too_common`, `password_entirely_numeric`, `password_too_similar`, `password_unchanged`. Mesmo limite `login` |
+| `GET admin/users/` | **Só administrador** (`401` anônimo, `403` membro). Contas por data de criação: `id, email, name, is_active, is_admin, must_change_password, date_joined, last_login`. Nada de exames |
+| `POST admin/users/` | Cria conta: `email` (obrigatório), `name`, `is_admin` (padrão falso), `password` (opcional). `201` com a conta e `temporary_password` (gerada quando `password` falta; `null` se digitada; mostrada uma vez). Sempre nasce com `must_change_password`. Erros no campo: `user_email_taken`, `password_*` |
+| `PATCH admin/users/{id}/` | Altera só `name`, `is_active`, `is_admin`. `409`: `admin_self_action` (desativar/rebaixar a si mesmo) e `last_admin` (último administrador ativo) |
+| `POST admin/users/{id}/reset-password/` | Nova senha temporária (`temporary_password`, uma vez) e `must_change_password`. `409 admin_self_action` na própria conta. Não há `DELETE` |
 | `GET`/`PUT profile/` | Perfil: `sex` (`male`/`female`) e `birth_date` |
 | `GET overview/` | Último valor, variação e sparkline por exame (mesmo dado de `analytesOverview`) |
 | `GET analytes/` | Catálogo de exames |
@@ -290,7 +340,10 @@ Prefixo `/api/v1/`. Tudo exige `Authorization: Bearer <access>`, exceto `health/
 | `POST exam-documents/{id}/confirm/` | Confirma todos os resultados (exceto os já corrigidos) e limpa os avisos do laudo |
 | `POST exam-documents/{id}/reprocess/` | Reextrai a partir do texto salvo. `202`, ou `409` |
 | `GET exam-results/` | Resultados do usuário. Filtros: `document` (id), `analyte` (slug), `review_status`, `flag`, `origin` |
+| `POST exam-documents/{id}/dismiss-warning/` | Marca um bloco não lido como resolvido: `{code: "block_unreadable", page, title?}` tira esse aviso do laudo. Idempotente |
+| `POST exam-results/` | Digita um resultado (origem `manual`): `document`, `name_raw`, `value_raw` (obrigatórios), `analyte`, `unit_raw`, `reference_raw`, `collected_at` (data ou data e hora; padrão: coleta do laudo), `notes`. `201` com o resultado; `409` se já existe (mesmo exame, dia e valor) ou o laudo está em leitura |
 | `GET`/`PATCH exam-results/{id}/` | Edição. Campos graváveis: `analyte`, `value_raw`, `unit_raw`, `reference_raw`, `collected_at`, `notes` e `review_status` (só `confirmed`) |
+| `DELETE exam-results/{id}/` | Apaga um resultado **manual** (`204`). Os lidos do laudo respondem `403` (`result_not_manual`) |
 
 Erros do upload (todos `{code, params}`): `file_missing` (400), `file_too_large` (413),
 `file_not_pdf` (415), `duplicate_document` (409, com `date`), `file_too_many_pages` (400),
@@ -432,7 +485,7 @@ de arquivo, status e contagens, nunca valores.
 cabeçalho que o app guarda (`laboratory`, `accession_number` = número do pedido, `ordering_physician`,
 `patient_name_on_doc`, `patient_birth_date`, `collected_on`, `issued_at`...) e `results`. Cada resultado traz o impresso
 (`value_raw`, `unit_raw`, `reference_raw`...), o normalizado (`value_numeric`, `unit`, `ref_low`/`ref_high`, `flag`...),
-`analyte` (slug do catálogo ou `null`, com `name_raw` ao lado), `origin` (`current` ou `lab_previous`), `collected_at`,
+`analyte` (slug do catálogo ou `null`, com `name_raw` ao lado), `origin` (`current`, `lab_previous` ou `manual`), `collected_at`,
 `review_status`, `warnings`, `source_line` e `page`/`position`, mais `summary` (uma linha de leitura, como
 `Hemoglobina 15,1 g/dL (13,3 a 16,5) normal`, ignorada na importação). A ordem é estável (nome do arquivo, página,
 posição), então dois exports diferem só no que mudou. Laudos que falham (ex.: uma ressonância, `no_results_found`) aparecem
@@ -465,6 +518,23 @@ revertida e mostra as mesmas contagens, sem gravar nada (nem o catálogo).
 **pulado e contado**, nunca sobrescrito (a segunda execução pula tudo). Linhas `lab_previous` seguem a regra do pipeline: o
 dia que você já tem é descartado e um resultado atual substitui o "anterior" semeado por outro laudo. O arquivo JSON nunca
 é modificado pelo comando.
+
+## Atualizar os avisos de laudos já importados
+
+Laudos importados antes de o aviso `block_unreadable` trazer o nome do exame só guardam a página. Para preencher o nome sem
+reimportar nada, releia os PDFs; o comando troca **só** `ExamDocument.warnings` (resultados, status, laboratório e o resto
+ficam como estão) e só quando os avisos novos diferem dos guardados:
+
+```bash
+# simula e mostra só contagens (use caminhos absolutos)
+mise run backfill-warnings -- ~/Laudos --email voce@email.com --recursive --dry-run
+# grava
+mise run backfill-warnings -- ~/Laudos --email voce@email.com --recursive
+```
+
+Só vale o PDF cujo `sha256` bate com um laudo **seu** já importado; os demais são ignorados. A leitura é a mesma do
+`export_reports` (só regras, transação revertida, usuário descartável). Se a leitura nova falhar, os avisos guardados
+ficam. Laudo lido com modelo é pulado. Avisos já marcados como resolvidos voltam: rode antes de usar "Marcar como resolvido".
 
 ## Solução de problemas
 

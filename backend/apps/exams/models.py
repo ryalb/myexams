@@ -23,6 +23,12 @@ class Profile(TimeStampedModel):
     )
     sex = models.CharField(max_length=10, choices=Sex.choices, blank=True)
     birth_date = models.DateField(null=True, blank=True)
+    # Papel de administrador DO APP (gerencia contas em /api/v1/admin/users/). É independente de
+    # `is_staff`/`is_superuser` (que abrem o site de admin do Django) e não dá acesso a exames
+    # de ninguém. Quem não tem Profile conta como não administrador.
+    is_admin = models.BooleanField(default=False)
+    # Senha temporária definida por um administrador: a pessoa precisa trocá-la no 1º acesso.
+    must_change_password = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "Perfil"
@@ -261,6 +267,12 @@ class Comparator(models.TextChoices):
 class ResultOrigin(models.TextChoices):
     CURRENT = "current", "Do laudo"
     LAB_PREVIOUS = "lab_previous", "Anteriores impressos"
+    MANUAL = "manual", "Manual"
+
+
+# Resultados "do laudo" para contagens, revisão e status: os lidos do PDF e os digitados pelo
+# usuário. `lab_previous` (histórico impresso) fica de fora.
+CURRENT_ORIGINS = (ResultOrigin.CURRENT, ResultOrigin.MANUAL)
 
 
 class ReviewStatus(models.TextChoices):

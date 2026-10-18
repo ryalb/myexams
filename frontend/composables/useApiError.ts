@@ -54,13 +54,44 @@ export function useApiError() {
     return t(fallbackKey)
   }
 
-  const warningText = (warning: { code: string; params?: Record<string, unknown> }): string =>
-    te(`warnings.${warning.code}`)
-      ? t(`warnings.${warning.code}`, warning.params ?? {})
-      : warning.code
+  // `block_unreadable` traz `title` (nome do exame); laudos antigos só têm a página. O
+  // texto de `warnings.block_unreadable` recebe o título já com o travessão, ou vazio.
+  const warningText = (warning: { code: string; params?: Record<string, unknown> }): string => {
+    if (!te(`warnings.${warning.code}`)) return warning.code
+    const params = { ...(warning.params ?? {}) }
+    if (warning.code === 'block_unreadable') {
+      params.title = params.title ? ` — ${String(params.title)}` : ''
+    }
+    return t(`warnings.${warning.code}`, params)
+  }
+
+  // Erros de validação por campo do DRF: `{value_raw: ['result_value_required']}`. Cada item é um
+  // código nosso (traduzido) ou uma mensagem nativa já em pt-BR. Chaves de erro com código
+  // (`code`, `params`, `detail`) não são de campo e ficam de fora.
+  const fieldErrors = (error: unknown): Record<string, string> => {
+    const data = (error as { data?: ApiErrorBody })?.data
+    const out: Record<string, string> = {}
+    if (!data || typeof data !== 'object') return out
+    for (const [field, value] of Object.entries(data)) {
+      if (field === 'code' || field === 'params' || field === 'detail') continue
+      const first = (Array.isArray(value) ? value : [value]).find((item) => typeof item === 'string')
+      if (typeof first === 'string' && first) out[field] = fromCode(first) ?? first
+    }
+    return out
+  }
+
+  // Todos os itens de um campo (ex.: uma senha pode falhar em vários validadores), cada um
+  // traduzido pelo código; mensagem nativa do DRF já vem em pt-BR e passa como está.
+  const fieldMessages = (error: unknown, field: string): string[] => {
+    const value = (error as { data?: ApiErrorBody })?.data?.[field]
+    const items = Array.isArray(value) ? value : [value]
+    return items
+      .filter((item): item is string => typeof item === 'string' && item !== '')
+      .map((item) => fromCode(item) ?? item)
+  }
 
   const errorText = (code: string, params?: Record<string, unknown>): string =>
     fromCode(code, params) ?? t('messages.genericError')
 
-  return { message, warningText, errorText }
+  return { message, warningText, errorText, fieldErrors, fieldMessages }
 }

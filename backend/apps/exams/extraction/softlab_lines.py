@@ -46,6 +46,17 @@ _QUALITATIVE = frozenset(
     {"negativo", "positivo", "reagente", "nao reagente", "ausente", "presente", "normal"}
 )
 
+
+def is_plain_value(text: str) -> bool:
+    """Só um número impresso, com comparador opcional (`4,5`, `<0,5`, `1.234`)."""
+    return _PLAIN_VALUE.match(text.strip()) is not None
+
+
+def is_qualitative_text(text: str) -> bool:
+    """O texto está no vocabulário qualitativo fechado (`Negativo`, `Não reagente`...)."""
+    return fold(text).strip(" .") in _QUALITATIVE
+
+
 # Linhas que não são resultado nem referência (texto dobrado: minúsculo e sem acento).
 _META = re.compile(
     r"^(?:metodos?\b|material\b|registro\s+anvisa|data\s+(?:da\s+)?(?:coleta|liberacao)"

@@ -14,4 +14,13 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (accessToken.value && publicRoutes.includes(to.path)) {
     return navigateTo('/documents')
   }
+
+  // Senha temporária (definida por um administrador): até trocá-la, o único destino é o bloco
+  // "Trocar senha" do perfil. É conveniência de tela; a API não depende disso.
+  if (accessToken.value && !publicRoutes.includes(to.path) && to.path !== '/profile') {
+    const current = await useCurrentUser().fetchUser()
+    if (current?.must_change_password) {
+      return navigateTo({ path: '/profile', hash: '#change-password' })
+    }
+  }
 })

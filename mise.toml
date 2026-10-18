@@ -63,9 +63,30 @@ run = "cd frontend && bun run lint:fix"
 description = "Confere códigos de erro/aviso do backend contra locales/pt-BR.json"
 run = "cd backend && uv run pytest apps/exams/tests/test_i18n_parity.py"
 
+[tasks.db-backup]
+description = "Backup do banco (pg_dump) em fixtures/private/db-backups, fora do git e com permissão 0600"
+run = "sh scripts/db-backup.sh"
+
+[tasks.db-reset]
+description = "Faz backup, APAGA o banco local e roda as migrations do zero (o banco fica VAZIO: depois rode reload-reports, ou use db-fresh). Ex.: mise run db-reset -- --yes --keep-users (--keep-users mantém contas e perfis)"
+depends = ["db-backup"]
+run = "cd backend && uv run python manage.py reset_db"
+
 [tasks.import-reports]
 description = "Importa laudos em PDF em lote, offline. Ex.: mise run import-reports -- ~/Laudos --email voce@email.com --recursive"
 run = "cd backend && uv run python manage.py import_reports"
+
+[tasks.db-fresh]
+description = "Tudo de uma vez: backup, apaga o banco (mantendo as contas), migra e recarrega os laudos de fixtures/private só com regras, com os nomes de laboratório de laboratories.json"
+run = [
+  "sh scripts/db-backup.sh",
+  "cd backend && uv run python manage.py reset_db --yes --keep-users",
+  "cd backend && uv run python manage.py import_reports ../fixtures/private --recursive --no-llm --laboratory-map ../fixtures/private/laboratories.json",
+]
+
+[tasks.reload-reports]
+description = "Recarrega os laudos de fixtures/private (só regras, sem modelo) usando fixtures/private/laboratories.json para os nomes que só estão nos logotipos. Use depois de db-reset. Ex.: mise run reload-reports -- --email voce@email.com"
+run = "cd backend && uv run python manage.py import_reports ../fixtures/private --recursive --no-llm --laboratory-map ../fixtures/private/laboratories.json"
 
 [tasks.export-reports]
 description = "Passo 1 da carga única: lê PDFs (sem modelo) e grava um JSON revisável, sem tocar no banco. Ex.: mise run export-reports -- ~/Laudos -o ~/laudos.json --recursive"
@@ -74,6 +95,14 @@ run = "cd backend && uv run python manage.py export_reports"
 [tasks.import-json]
 description = "Passo 2 da carga única: carrega no banco o JSON revisado. Ex.: mise run import-json -- ~/laudos.json --email voce@email.com --dry-run"
 run = "cd backend && uv run python manage.py import_json"
+
+[tasks.backfill-warnings]
+description = "Atualiza só os avisos de laudos já importados (nome do exame nos blocos não lidos), relendo os PDFs sem modelo. Ex.: mise run backfill-warnings -- ~/Laudos --email voce@email.com --dry-run"
+run = "cd backend && uv run python manage.py backfill_warnings"
+
+[tasks.make-admin]
+description = "Concede (ou, com --revoke, retira) o papel de administrador do app a uma conta existente. Ex.: mise run make-admin -- voce@email.com"
+run = "cd backend && uv run python manage.py make_admin"
 
 [tasks.extraction-eval]
 description = "Avalia a extração com o Ollama real sobre fixtures (opt-in)"

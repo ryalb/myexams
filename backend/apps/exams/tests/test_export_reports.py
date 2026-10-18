@@ -181,16 +181,18 @@ def test_originals_are_untouched(user, pdfs, out):
 
 
 def test_export_never_calls_the_model_and_does_not_leak_settings(user, pdfs, out, fake_llm):
-    budget = django_settings.EXTRACTION_LLM_BUDGET_SECONDS
+    use_llm = django_settings.EXTRACTION_USE_LLM
 
     data = export(out.parent.parent / "laudos", out)
 
     assert fake_llm.result_calls == [] and fake_llm.header_calls == []
-    assert django_settings.EXTRACTION_LLM_BUDGET_SECONDS == budget
-    # o hemograma só o modelo lê: sem modelo, o laudo fica para revisão com o aviso
+    assert django_settings.EXTRACTION_USE_LLM == use_llm  # o override não vaza
+    # o hemograma só o modelo lê: sem modelo, o laudo fica para revisão com o bloco na lista
     first = data["documents"][0]
     assert first["status"] == "needs_review"
-    assert "llm_budget_exceeded" in {w["code"] for w in first["warnings"]}
+    codes = {w["code"] for w in first["warnings"]}
+    assert "block_unreadable" in codes
+    assert "llm_budget_exceeded" not in codes  # desligado de propósito não é "tempo esgotado"
 
 
 def test_ordering_is_stable_across_exports(user, pdfs, out, tmp_path):

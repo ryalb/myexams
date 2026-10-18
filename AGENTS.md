@@ -67,6 +67,35 @@ db 5433, redis 6380, API 8100, web 3100. As tasks `kill-port` só mexem nas port
   `strip_boilerplate`). O usuário corrige em `PATCH /exam-documents/<id>/` (`laboratory_name`; vazio
   limpa; nunca renomeia a linha compartilhada; recusa `uploaded`/`extracting` e colisão de
   `(laboratório, pedido)` com códigos) e vê as sugestões em `GET /laboratories/` (só os dele).
+- **Blocos não lidos e resultados manuais**: o aviso do laudo `block_unreadable` traz `page` e `title`
+  (nome do exame como impresso: o que vem antes de `|`/`:`, até 80 caracteres; nunca valores nem outro
+  texto do bloco) e é um por bloco. A tela lista esses blocos e o usuário pode digitar o resultado:
+  `POST /exam-results/` cria linha com `origin=manual` (`CURRENT_ORIGINS` = `current` + `manual` conta como
+  "do laudo" em contagens, status, GraphQL e histórico). Tudo derivado (número, unidade, faixa, flag, avisos)
+  vem do código determinístico da importação (`extraction/manual.py` -> `recompute_result` +
+  `rederived_warnings`); `user_corrected`, ou `needs_review` se os avisos pedem. Só linhas `manual` podem ser
+  apagadas (`DELETE`, senão 403 `result_not_manual`); laudo com linha manual não reprocessa.
+  `POST /exam-documents/<id>/dismiss-warning/` tira um `block_unreadable`; `backfill_warnings` preenche o
+  título em laudos antigos relendo o PDF (só `warnings` muda).
+- **Contas e administrador do app** (`accounts.py`, `accounts_api.py`, `permissions.py`): `Profile.is_admin`
+  (+ `must_change_password`) é independente de `is_staff`/`is_superuser`; sem `Profile` = não admin. Admin API em
+  `/api/v1/admin/users/` (`IsAppAdmin`: autenticado + ativo + `is_admin`, lido do banco a cada chamada): lista
+  (só dados de conta, **nunca** contagem/conteúdo de exames), cria (senha temporária de `secrets`, devolvida uma vez,
+  `Cache-Control: no-store`), `PATCH` (`name`/`is_active`/`is_admin`) e `reset-password`; 409 `admin_self_action` e
+  `last_admin` (trava em transação sobre os perfis de admin). **Sem endpoint de exclusão, de propósito**: apagar a
+  conta apagaria os exames de alguém; só se desativa. Cada ação vai para o logger `apps.exams.admin_actions` (ids e
+  ação; nunca senha nem dado de exame). `manage.py make_admin <email> [--revoke]` cria o 1º admin. Troca da própria
+  senha: `POST /auth/change-password/` (devolve tokens novos). JWT: `CHECK_REVOKE_TOKEN` embute o hash da senha no token,
+  então trocar/redefinir a senha invalida os tokens antigos (sem app de blacklist); conta inativa é recusada em login,
+  refresh, REST e GraphQL. Limitações: ligar isso encerrou uma vez as sessões que já existiam; um WebSocket já aberto só
+  é conferido na conexão; `must_change_password` é imposto pelo frontend (middleware), não pela API.
+- **Modo só regras (`EXTRACTION_USE_LLM=false`)**: `build_llm_client()` devolve `DisabledLLMClient`
+  (nunca conecta ao Ollama) e `analyze` usa orçamento zero. O que as regras não leem vira
+  `block_unreadable` (com título) e dá para digitar o resultado; **não** há `llm_budget_exceeded`
+  (isso é só "tempo esgotado" com o modelo ligado). Página sem texto vira "página não lida"
+  (`block_unreadable` sem título); se o PDF inteiro é imagem, o laudo falha com `llm_disabled`.
+  `--no-llm`, `export_reports` e `backfill_warnings` usam o mesmo desligamento, só durante o
+  comando (`offline.py::offline_settings`, um `override_settings`: nada vaza). Padrão do código: ligado.
 - **O LLM só transcreve.** Números, unidades, faixas, sinalização e resolução do exame são
   determinísticos e testados (`numbers.py`, `units.py`, `reference.py`, `flags.py`, `analytes.py`).
 - **Guardas de alucinação**: valor transcrito precisa existir no texto do bloco; faltando valor

@@ -1,10 +1,11 @@
 import logging
-from datetime import date
+from datetime import date, datetime, time
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
-from rest_framework import mixins, permissions, status, viewsets
+from django.db.models import Count, Max, Q
+from django.utils import timezone
+from rest_framework import mixins, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
@@ -12,13 +13,15 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .codes import ErrorCode
+from .codes import ErrorCode, WarningCode
 from .errors import CodedAPIError
 from .extraction.analytes import AnalyteResolver, learn_alias
+from .extraction.manual import build_manual_result, duplicate_key
 from .extraction.pipeline import find_accession_clash, laboratory_for
 from .extraction.recompute import recompute_result
 from .history import build_analyte_history, build_overview
 from .models import (
+    CURRENT_ORIGINS,
     Analyte,
     DocumentStatus,
     ExamDocument,
@@ -31,13 +34,16 @@ from .models import (
 )
 from .pagination import UnboundedCollectionPagination
 from .serializers import (
+    MAX_ABS_DECIMAL,
     AnalyteSerializer,
+    DismissWarningSerializer,
     DocumentLaboratorySerializer,
     ExamDocumentDetailSerializer,
     ExamDocumentSerializer,
     ExamResultSerializer,
     ExtractionRunSerializer,
     LaboratorySerializer,
+    ManualResultSerializer,
     ProfileSerializer,
     RegisterSerializer,
 )
@@ -144,6 +150,10 @@ class CurrentUserAPIView(APIView):
                 "email": user.email,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
+                # Papel e troca de senha pendente ficam fora do `profile`: é ele que o PUT
+                # /profile/ grava, e o usuário nunca pode se promover por ali.
+                "is_admin": profile.is_admin,
+                "must_change_password": profile.must_change_password,
                 "profile": ProfileSerializer(profile).data,
             }
         )
@@ -222,7 +232,7 @@ def refresh_document_status(document: ExamDocument) -> None:
     if document.status not in (DocumentStatus.NEEDS_REVIEW, DocumentStatus.COMPLETED):
         return
     pending = document.results.filter(
-        origin=ResultOrigin.CURRENT, review_status=ReviewStatus.NEEDS_REVIEW
+        origin__in=CURRENT_ORIGINS, review_status=ReviewStatus.NEEDS_REVIEW
     ).exists()
     document.status = (
         DocumentStatus.NEEDS_REVIEW if pending or document.warnings else DocumentStatus.COMPLETED
@@ -253,7 +263,7 @@ class ExamDocumentViewSet(
         return ExamDocumentDetailSerializer if self.action == "retrieve" else ExamDocumentSerializer
 
     def get_queryset(self):
-        current = Q(results__origin=ResultOrigin.CURRENT)
+        current = Q(results__origin__in=CURRENT_ORIGINS)
         queryset = (
             ExamDocument.objects.filter(user=self.request.user)
             .select_related("laboratory")
@@ -393,16 +403,49 @@ class ExamDocumentViewSet(
             document.results.exclude(review_status=ReviewStatus.USER_CORRECTED).update(
                 review_status=ReviewStatus.CONFIRMED
             )
-            document.warnings = []
+            # Blocos não lidos só saem da lista quando o usuário digita o resultado ou marca
+            # como resolvido: confirmar o que FOI lido não pode esconder o que ficou de fora.
+            document.warnings = [
+                w for w in document.warnings if w.get("code") == WarningCode.BLOCK_UNREADABLE
+            ]
             document.save(update_fields=["warnings", "updated_at"])
             refresh_document_status(document)
+        return Response(ExamDocumentSerializer(self.get_queryset().get(pk=document.pk)).data)
+
+    @action(detail=True, methods=["post"], url_path="dismiss-warning")
+    def dismiss_warning(self, request, pk=None):
+        """Marca um bloco não lido como resolvido: tira exatamente esse aviso do laudo.
+
+        Corpo: `{code, page, title?}`. Só `block_unreadable` pode ser dispensado. Com `title`,
+        só o aviso daquele bloco; sem, todos os da página (laudos antigos não têm título).
+        Idempotente: se o aviso já não existe, responde 200 com o laudo como está.
+        """
+        document = self.get_object()
+        serializer = DismissWarningSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if data["code"] != WarningCode.BLOCK_UNREADABLE:
+            raise CodedAPIError(ErrorCode.WARNING_NOT_DISMISSIBLE)
+
+        with transaction.atomic():
+            # Trava a linha: o worker grava os avisos ao fim da extração.
+            locked = ExamDocument.objects.select_for_update().get(pk=document.pk, user=request.user)
+            if locked.status in (DocumentStatus.UPLOADED, DocumentStatus.EXTRACTING):
+                raise CodedAPIError(ErrorCode.DOCUMENT_BUSY, status_code=409)
+            kept = [w for w in locked.warnings if not _matches_warning(w, data)]
+            if len(kept) != len(locked.warnings):
+                locked.warnings = kept
+                locked.save(update_fields=["warnings", "updated_at"])
+                refresh_document_status(locked)
         return Response(ExamDocumentSerializer(self.get_queryset().get(pk=document.pk)).data)
 
     @action(detail=True, methods=["post"], url_path="reprocess")
     def reprocess(self, request, pk=None):
         document = self.get_object()
+        # Reprocessar apaga e refaz os resultados: nunca com edição, confirmação ou linha digitada.
         edited = document.results.filter(
-            review_status__in=[ReviewStatus.USER_CORRECTED, ReviewStatus.CONFIRMED]
+            Q(review_status__in=[ReviewStatus.USER_CORRECTED, ReviewStatus.CONFIRMED])
+            | Q(origin=ResultOrigin.MANUAL)
         ).exists()
         if not document.page_text or edited:
             raise CodedAPIError(ErrorCode.DOCUMENT_NOT_REPROCESSABLE, status_code=409)
@@ -422,16 +465,25 @@ class ExamDocumentViewSet(
         return Response(status=status.HTTP_202_ACCEPTED)
 
 
+def _matches_warning(item: dict, target: dict) -> bool:
+    params = item.get("params") or {}
+    if item.get("code") != target["code"] or params.get("page") != target["page"]:
+        return False
+    return "title" not in target or params.get("title", "") == target["title"]
+
+
 class ExamResultViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.UpdateModelMixin,
     viewsets.GenericViewSet,
 ):
+    """Resultados do usuário. POST digita um resultado (`manual`); DELETE só apaga os manuais."""
+
     serializer_class = ExamResultSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = UnboundedCollectionPagination
-    http_method_names = ["get", "patch", "head", "options"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         queryset = ExamResult.objects.filter(user=self.request.user).select_related("analyte")
@@ -448,6 +500,77 @@ class ExamResultViewSet(
             if (value := _choice_param(params, field, choices)) is not None:
                 queryset = queryset.filter(**{field: value})
         return queryset.order_by("-collected_at", "document_id", "position")
+
+    def create(self, request, *args, **kwargs):
+        """Digita um resultado que a leitura automática não pegou (origem `manual`)."""
+        serializer = ManualResultSerializer(
+            data=request.data, context=self.get_serializer_context()
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            # Trava o laudo: serializa criações concorrentes (duplicidade, posição) e o worker.
+            document = ExamDocument.objects.select_for_update().get(
+                pk=data["document"].pk, user=request.user
+            )
+            if document.status in (DocumentStatus.UPLOADED, DocumentStatus.EXTRACTING):
+                raise CodedAPIError(ErrorCode.DOCUMENT_BUSY, status_code=409)
+
+            collected_at = data.get("collected_at")
+            if collected_at is None and document.collected_on is not None:
+                collected_at = timezone.make_aware(
+                    datetime.combine(document.collected_on, time.min)
+                )
+
+            key = duplicate_key(data["name_raw"], collected_at, data["value_raw"])
+            for existing in document.results.only("id", "name_raw", "collected_at", "value_raw"):
+                if (
+                    duplicate_key(existing.name_raw, existing.collected_at, existing.value_raw)
+                    == key
+                ):
+                    raise CodedAPIError(
+                        ErrorCode.RESULT_DUPLICATE, {"result_id": existing.pk}, status_code=409
+                    )
+
+            last = document.results.aggregate(position=Max("position"), page=Max("page"))
+            profile = Profile.objects.filter(user=request.user).first()
+            explicit = data.get("analyte")
+            result = build_manual_result(
+                user=request.user,
+                document=document,
+                name_raw=data["name_raw"],
+                value_raw=data["value_raw"],
+                unit_raw=data["unit_raw"],
+                reference_raw=data["reference_raw"],
+                collected_at=collected_at,
+                notes=data["notes"],
+                analyte=explicit,
+                resolver=AnalyteResolver(user=request.user),
+                sex=(profile.sex or None) if profile else None,
+                birth_date=profile.birth_date if profile else None,
+                page=last["page"] or 1,
+                position=0 if last["position"] is None else last["position"] + 1,
+            )
+            _check_decimal_bounds(result)
+            result.save()
+            if explicit is not None:
+                learn_alias(request.user, result.name_raw, explicit)
+            refresh_document_status(document)
+        return Response(ExamResultSerializer(result).data, status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, *args, **kwargs):
+        """Desfaz um resultado digitado. Os lidos do laudo não se apagam (reprocesse o laudo)."""
+        result = self.get_object()
+        if result.origin != ResultOrigin.MANUAL:
+            raise CodedAPIError(ErrorCode.RESULT_NOT_MANUAL, status_code=403)
+        with transaction.atomic():
+            document = ExamDocument.objects.select_for_update().get(
+                pk=result.document_id, user=request.user
+            )
+            result.delete()
+            refresh_document_status(document)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def perform_update(self, serializer):
         before = _editable_snapshot(serializer.instance)
@@ -469,6 +592,22 @@ class ExamResultViewSet(
                     learn_alias(self.request.user, result.name_raw, result.analyte)
                 result.save()
             refresh_document_status(result.document)
+
+
+def _check_decimal_bounds(result: ExamResult) -> None:
+    """Valores que não cabem nas colunas numéricas viram erro de campo, nunca 500."""
+    if any(
+        value is not None and abs(value) >= MAX_ABS_DECIMAL
+        for value in (result.value_numeric, result.value_canonical)
+    ):
+        raise serializers.ValidationError({"value_raw": [ErrorCode.RESULT_VALUE_INVALID.value]})
+    if any(
+        value is not None and abs(value) >= MAX_ABS_DECIMAL
+        for value in (result.ref_low, result.ref_high)
+    ):
+        raise serializers.ValidationError(
+            {"reference_raw": [ErrorCode.RESULT_REFERENCE_INVALID.value]}
+        )
 
 
 def _editable_snapshot(result: ExamResult) -> tuple:
