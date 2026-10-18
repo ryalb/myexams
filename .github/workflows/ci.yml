@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: myexams
+          POSTGRES_USER: myexams
+          POSTGRES_PASSWORD: myexams
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U myexams -d myexams"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_DB: myexams
+      POSTGRES_USER: myexams
+      POSTGRES_PASSWORD: myexams
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://127.0.0.1:6379/0
+      DJANGO_DEBUG: "False"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: mise install
+      - run: cp backend/.env.example backend/.env
+      - name: Dependências (sem Ollama no CI)
+        run: |
+          cd backend && uv sync --group dev
+          cd ../frontend && bun install
+      - run: mise run check
+      - run: mise run frontend-build
+      - run: uv tool run prek run --all-files

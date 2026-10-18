@@ -1,0 +1,61 @@
+:root {
+  /* Controle nativo (input, select, textarea) segue `color-scheme`, não as classes
+     do Tailwind. Sem fixar aqui, um SO em modo escuro desenha input preto sobre a
+     página clara, e a única pista no CSS da aplicação seria a ausência de
+     `background`. O app é claro por design — ver `body` abaixo. */
+  color-scheme: light;
+
+  --color-sepia-50: #fbf7ee;
+  --color-sepia-100: #f5eedd;
+  --color-sepia-200: #e7d9b8;
+  --color-sepia-300: #cfb683;
+  --color-sepia-400: #ad8a54;
+  --color-sepia-500: #85652f;
+  --color-sepia-600: #6b4f26;
+  --color-sepia-700: #4e3a1d;
+  --color-sepia-800: #33261a;
+  --color-sepia-900: #241b10;
+  --color-sepia-950: #160f09;
+}
+
+body {
+  background-color: #fbf7ee;
+  color: #241b10;
+  font-family: "Iosevka Nerd Font", Iosevka, ui-monospace, monospace;
+}
+
+h1, h2, h3 {
+  font-family: "Iosevka Nerd Font", Iosevka, ui-monospace, monospace;
+}
+
+a {
+  color: #85652f;
+}
+
+a:hover {
+  color: #6b4f26;
+}
+
+/* Régua dupla de contabilidade: marca visualmente um total final (vs. a régua
+   simples de um subtotal). `border-bottom-style: double` já renderiza as duas
+   linhas nativamente, sem markup extra. */
+.ledger-total-rule {
+  border-bottom: 3px double var(--color-sepia-400);
+}
+
+/* Esconde a barra de rolagem mantendo a rolagem (Tailwind v3 não traz utilitário). */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE e Edge antigos */
+  scrollbar-width: none; /* Firefox */
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari e Opera */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

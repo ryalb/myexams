@@ -1,0 +1,20 @@
+services:
+  # Portas próprias (5433/6380) para não colidir com outros projetos locais.
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: myexams
+      POSTGRES_USER: myexams
+      POSTGRES_PASSWORD: myexams
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:8.10.0-alpine3.23
+    ports:
+      - "127.0.0.1:6380:6379"
+
+volumes:
+  postgres_data:

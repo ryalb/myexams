@@ -1,0 +1,19 @@
+.DS_Store
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+node_modules/
+.nuxt/
+.output/
+dist/
+coverage/
+.idea/
+.vscode/
+.venv/
+backend/staticfiles/
+# Laudos reais contêm dados de saúde: nunca versionar.
+backend/tmp_uploads/
+fixtures/private/
+tmp/

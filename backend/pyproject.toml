@@ -1,0 +1,64 @@
+[project]
+name = "myexams-backend"
+version = "0.1.0"
+description = "MyExams backend API"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "celery>=5.4,<6.0",
+  "channels>=4.0.0",
+  "channels_redis>=4.2.0",
+  "daphne>=4.0.0",
+  "django-cors-headers>=4.4,<5.0",
+  "Django>=5.1,<6.0",
+  "djangorestframework-simplejwt>=5.3,<6.0",
+  "djangorestframework>=3.15,<4.0",
+  "graphene-django>=3.2,<4.0",
+  "pdfplumber>=0.11,<0.12",
+  "psycopg[binary]>=3.2,<4.0",
+  "python-dotenv>=1.0,<2.0",
+  "redis>=5.0,<6.0",
+  "requests>=2.32,<3.0",
+  "rich>=13.0,<14.0",
+]
+
+[dependency-groups]
+dev = [
+  "prek>=0.4,<0.5",
+  "pytest>=8.3,<9.0",
+  "pytest-django>=4.9,<5.0",
+  "reportlab>=4.2,<5.0",
+  "ruff>=0.6,<0.7",
+  "ty>=0.0.1a8,<0.1",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py"]
+testpaths = ["apps"]
+addopts = "--reuse-db"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+# ty não entende os descritores de campo do Django (sem plugin): atribuir
+# `str`/`Decimal` a um CharField/DecimalField vira falso positivo. Estas classes
+# de regra ficam desligadas; o restante (nomes indefinidos, imports) segue ativo.
+[tool.ty.rules]
+unresolved-attribute = "ignore"
+unknown-argument = "ignore"
+invalid-return-type = "ignore"
+invalid-assignment = "ignore"
+invalid-argument-type = "ignore"
+invalid-attribute-override = "ignore"
+not-subscriptable = "ignore"
+not-iterable = "ignore"
+unsupported-operator = "ignore"

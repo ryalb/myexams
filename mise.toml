@@ -1,0 +1,106 @@
+[tools]
+python = "3.12"
+uv = "0.8.8"
+bun = "1.3.5"
+node = "22"
+
+[env]
+PYTHONPATH = "backend"
+
+[tasks.setup]
+description = "Sobe db/redis e instala dependências (backend + frontend)"
+run = "sh scripts/setup.sh"
+
+[tasks.backend-dev]
+description = "Django via Daphne (ASGI/WebSocket) na porta 8100"
+depends = ["kill-port 8100"]
+run = "cd backend && uv run daphne config.asgi:application --port 8100"
+env = { FORCE_COLOR = "1" }
+
+[tasks.backend-migrate]
+description = "Aplica migrations"
+run = "cd backend && uv run python manage.py migrate"
+
+[tasks.backend-worker]
+description = "Celery worker (pool solo: uma extração por vez; evita o pool prefork/spawn do macOS)"
+run = "cd backend && uv run celery -A config worker -l info --pool=solo"
+
+[tasks.backend-lint]
+description = "Ruff check"
+run = "cd backend && uv run ruff check . --fix"
+
+[tasks.backend-format]
+description = "Ruff format"
+run = "cd backend && uv run ruff format ."
+
+[tasks.backend-typecheck]
+description = "ty"
+run = "cd backend && uv run ty check ."
+
+[tasks.backend-test]
+description = "pytest"
+run = "cd backend && uv run pytest"
+
+[tasks.frontend-dev]
+depends = ["kill-port 3100"]
+description = "Nuxt dev server na porta 3100"
+run = "cd frontend && bun run dev"
+output = "interleave"
+
+[tasks.frontend-build]
+description = "Build do frontend"
+run = "cd frontend && bun run build"
+
+[tasks.frontend-lint]
+description = "ESLint (inclui regras de i18n)"
+run = "cd frontend && bun run lint"
+
+[tasks.frontend-lint-fix]
+description = "ESLint com correções"
+run = "cd frontend && bun run lint:fix"
+
+[tasks.check-i18n]
+description = "Confere códigos de erro/aviso do backend contra locales/pt-BR.json"
+run = "cd backend && uv run pytest apps/exams/tests/test_i18n_parity.py"
+
+[tasks.import-reports]
+description = "Importa laudos em PDF em lote, offline. Ex.: mise run import-reports -- ~/Laudos --email voce@email.com --recursive"
+run = "cd backend && uv run python manage.py import_reports"
+
+[tasks.export-reports]
+description = "Passo 1 da carga única: lê PDFs (sem modelo) e grava um JSON revisável, sem tocar no banco. Ex.: mise run export-reports -- ~/Laudos -o ~/laudos.json --recursive"
+run = "cd backend && uv run python manage.py export_reports"
+
+[tasks.import-json]
+description = "Passo 2 da carga única: carrega no banco o JSON revisado. Ex.: mise run import-json -- ~/laudos.json --email voce@email.com --dry-run"
+run = "cd backend && uv run python manage.py import_json"
+
+[tasks.extraction-eval]
+description = "Avalia a extração com o Ollama real sobre fixtures (opt-in)"
+run = "cd backend && uv run python manage.py extraction_eval"
+
+[tasks.ollama-log]
+description = "Acompanha o log do Ollama (só o útil: requisições, tokens/s, carga de modelos, erros). Ex.: mise run ollama-log -- 40"
+run = "sh scripts/ollama-log.sh"
+
+[tasks.ollama-pull]
+description = "Baixa os modelos do Ollama usados pela extração"
+run = "sh scripts/ollama-pull.sh"
+
+[tasks.kill-port]
+description = "Mata processos numa porta"
+run = "sh -c 'lsof -ti :$1 | xargs kill -9 2>/dev/null || true' dummy $1"
+
+[tasks.check]
+description = "Lint + typecheck + testes (backend) + lint (frontend)"
+run = [
+  "mise run backend-lint",
+  "mise run backend-typecheck",
+  "mise run backend-test",
+  "mise run frontend-lint",
+]
+
+[tasks.dev]
+description = "Stack de desenvolvimento em paralelo (API, worker, frontend)"
+depends = ["setup"]
+run = "mise run backend-dev ::: backend-worker ::: frontend-dev"

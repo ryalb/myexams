@@ -1,0 +1,26 @@
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.6.9"
+hooks = [
+  { id = "ruff-check", args = ["--fix"], files = "^backend/.*\\.py$" },
+  { id = "ruff-format", files = "^backend/.*\\.py$" },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "ty-check"
+name = "ty check"
+entry = "sh -c 'cd backend && uv run ty check .'"
+language = "system"
+pass_filenames = false
+files = "^backend/.*\\.py$"
+
+[[repos.hooks]]
+id = "frontend-eslint"
+name = "frontend eslint"
+entry = "sh -c 'cd frontend && bun run lint'"
+language = "system"
+pass_filenames = false
+files = "^frontend/.*\\.(js|mjs|cjs|ts|vue|json)$"

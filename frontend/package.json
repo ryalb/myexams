@@ -1,0 +1,39 @@
+{
+  "name": "myexams-frontend",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.5",
+  "scripts": {
+    "dev": "nuxt dev --port 3100",
+    "build": "nuxt build",
+    "start": "nuxt start",
+    "postinstall": "nuxt prepare",
+    "lint": "node scripts/build-icons.mjs --check && eslint . && node scripts/audit-buttons.mjs",
+    "lint:fix": "node scripts/build-icons.mjs && eslint . --fix && node scripts/audit-buttons.mjs",
+    "audit:buttons": "node scripts/audit-buttons.mjs",
+    "icons": "node scripts/build-icons.mjs"
+  },
+  "dependencies": {
+    "@iconify/vue": "^5.0.0",
+    "@nuxtjs/apollo": "^5.0.0-alpha.14",
+    "@nuxtjs/i18n": "^10.6.0",
+    "@nuxtjs/tailwindcss": "^6.12.1",
+    "@primeuix/themes": "^3.0.0",
+    "chart.js": "^4.5.1",
+    "graphql": "^16.9.0",
+    "ldrs": "^1.1.9",
+    "nuxt": "^3.13.2",
+    "primeicons": "^7.0.0",
+    "primevue": "^4.0.7",
+    "vue": "^3.4.38"
+  },
+  "devDependencies": {
+    "@iconify-json/mdi": "^1.2.3",
+    "@intlify/eslint-plugin-vue-i18n": "^4.0.0",
+    "@nuxt/eslint-config": "^1.9.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.11.1",
+    "postcss": "^8.4.41",
+    "tailwindcss": "^3.4.10"
+  }
+}
