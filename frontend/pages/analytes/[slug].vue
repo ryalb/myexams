@@ -7,6 +7,19 @@ const slug = String(route.params.slug)
 const { graphql } = useApi()
 const fmt = useFormat()
 const { t } = useI18n()
+const cols = useColumnVisibility(
+  'analyte-history',
+  computed(() => [
+    { key: 'date', label: t('analyte.colDate'), required: true },
+    { key: 'laboratory', label: t('analyte.colLaboratory'), mobileHidden: true },
+    { key: 'printed', label: t('analyte.colPrinted'), required: true },
+    { key: 'unit', label: t('analyte.colUnit') },
+    { key: 'canonical', label: t('analyte.colCanonical'), mobileHidden: true },
+    { key: 'reference', label: t('analyte.colReference'), mobileHidden: true },
+    { key: 'situation', label: t('analyte.colSituation') },
+    { key: 'origin', label: t('analyte.colOrigin'), mobileHidden: true },
+  ]),
+)
 
 const HISTORY_QUERY = `query ($slug: String!) {
   analyteHistory(slug: $slug) {
@@ -98,7 +111,7 @@ const tableRows = computed(() => [...points.value].reverse())
                 type="button"
                 :aria-pressed="range === option.value"
                 :class="[
-                  'px-3 py-1.5 text-xs',
+                  'px-3 py-2.5 text-xs sm:py-1.5',
                   range === option.value ? 'bg-sepia-900 text-sepia-50' : 'bg-white text-sepia-700 hover:bg-sepia-50',
                 ]"
                 @click="range = option.value"
@@ -119,35 +132,38 @@ const tableRows = computed(() => [...points.value].reverse())
         </section>
 
         <section class="overflow-hidden rounded-lg border border-sepia-200 bg-white shadow-sm">
-          <h2 class="border-b border-sepia-100 bg-sepia-50 px-4 py-2 text-sm font-semibold text-sepia-800">{{ $t('analyte.tableTitle') }}</h2>
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-sepia-100 bg-sepia-50 px-4 py-2">
+            <h2 class="text-sm font-semibold text-sepia-800">{{ $t('analyte.tableTitle') }}</h2>
+            <ColumnToggle id="analyte-history" :cols="cols" />
+          </div>
           <div class="overflow-x-auto">
             <table class="min-w-full text-sm">
               <thead class="text-left text-xs uppercase tracking-wide text-sepia-500">
                 <tr>
                   <th class="px-4 py-2">{{ $t('analyte.colDate') }}</th>
-                  <th class="px-4 py-2">{{ $t('analyte.colLaboratory') }}</th>
+                  <th v-if="cols.show('laboratory')" class="px-4 py-2">{{ $t('analyte.colLaboratory') }}</th>
                   <th class="px-4 py-2 text-right">{{ $t('analyte.colPrinted') }}</th>
-                  <th class="px-4 py-2">{{ $t('analyte.colUnit') }}</th>
-                  <th class="px-4 py-2 text-right">{{ $t('analyte.colCanonical') }}</th>
-                  <th class="px-4 py-2">{{ $t('analyte.colReference') }}</th>
-                  <th class="px-4 py-2">{{ $t('analyte.colSituation') }}</th>
-                  <th class="px-4 py-2">{{ $t('analyte.colOrigin') }}</th>
+                  <th v-if="cols.show('unit')" class="px-4 py-2">{{ $t('analyte.colUnit') }}</th>
+                  <th v-if="cols.show('canonical')" class="px-4 py-2 text-right">{{ $t('analyte.colCanonical') }}</th>
+                  <th v-if="cols.show('reference')" class="px-4 py-2">{{ $t('analyte.colReference') }}</th>
+                  <th v-if="cols.show('situation')" class="px-4 py-2">{{ $t('analyte.colSituation') }}</th>
+                  <th v-if="cols.show('origin')" class="px-4 py-2">{{ $t('analyte.colOrigin') }}</th>
                   <th class="px-4 py-2"><span class="sr-only">{{ $t('analyte.openDocument') }}</span></th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-sepia-100">
                 <tr v-for="point in tableRows" :key="point.id" class="align-top hover:bg-sepia-50">
                   <td class="px-4 py-3 whitespace-nowrap">{{ fmt.date(point.collectedAt) }}</td>
-                  <td class="px-4 py-3">{{ point.laboratory || $t('common.empty') }}</td>
+                  <td v-if="cols.show('laboratory')" class="px-4 py-3">{{ point.laboratory || $t('common.empty') }}</td>
                   <td class="px-4 py-3 text-right tabular-nums font-medium">{{ point.valueRaw || $t('common.empty') }}</td>
-                  <td class="px-4 py-3 text-sepia-600">{{ point.unit || $t('common.empty') }}</td>
-                  <td class="px-4 py-3 text-right tabular-nums">{{ fmt.number(point.value) }}</td>
-                  <td class="px-4 py-3 max-w-[18rem] whitespace-pre-line text-xs text-sepia-600">{{ point.referenceRaw || $t('common.empty') }}</td>
-                  <td class="px-4 py-3">
+                  <td v-if="cols.show('unit')" class="px-4 py-3 text-sepia-600">{{ point.unit || $t('common.empty') }}</td>
+                  <td v-if="cols.show('canonical')" class="px-4 py-3 text-right tabular-nums">{{ fmt.number(point.value) }}</td>
+                  <td v-if="cols.show('reference')" class="px-4 py-3 max-w-[18rem] whitespace-pre-line text-xs text-sepia-600">{{ point.referenceRaw || $t('common.empty') }}</td>
+                  <td v-if="cols.show('situation')" class="px-4 py-3">
                     <ResultsFlagBadge :flag="point.flag" />
                     <p v-if="point.interpretation" class="mt-0.5 text-xs text-sepia-500">{{ point.interpretation }}</p>
                   </td>
-                  <td class="px-4 py-3 text-xs text-sepia-500">{{ $t(`origin.${point.origin}`) }}</td>
+                  <td v-if="cols.show('origin')" class="px-4 py-3 text-xs text-sepia-500">{{ $t(`origin.${point.origin}`) }}</td>
                   <td class="px-4 py-3 text-right">
                     <NuxtLink
                       :to="`/documents/${point.documentId}`"

@@ -22,6 +22,19 @@ const { data: overview, error, refresh, status } = await useResilientAsyncData<A
   { default: () => [] },
 )
 
+const cols = useColumnVisibility(
+  'results',
+  computed(() => [
+    { key: 'exam', label: t('results.colExam'), required: true },
+    { key: 'latest', label: t('results.colLatest'), required: true },
+    { key: 'date', label: t('results.colDate'), mobileHidden: true },
+    { key: 'situation', label: t('results.colSituation') },
+    { key: 'change', label: t('results.colChange'), mobileHidden: true },
+    { key: 'trend', label: t('results.colTrend'), mobileHidden: true },
+    { key: 'count', label: t('results.colCount'), mobileHidden: true },
+  ]),
+)
+
 const search = ref('')
 const onlyOutOfRange = ref(false)
 
@@ -63,20 +76,21 @@ const latestLabel = (row: AnalyteOverview) =>
     </header>
 
     <div class="flex flex-wrap items-center gap-4">
-      <div class="relative">
+      <div class="relative w-full sm:w-auto">
         <Icon icon="mdi:magnify" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sepia-500" />
         <input
           v-model="search"
           type="search"
           :placeholder="$t('results.search')"
           :aria-label="$t('results.search')"
-          class="h-10 w-72 rounded-md border border-sepia-200 bg-white pl-9 pr-3 text-sm focus:border-sepia-500 focus:outline-none"
+          class="h-11 w-full rounded-md border border-sepia-200 bg-white pl-9 pr-3 text-base focus:border-sepia-500 focus:outline-none sm:h-10 sm:w-72 sm:text-sm"
         >
       </div>
       <label class="flex items-center gap-2 text-sm text-sepia-700">
         <input v-model="onlyOutOfRange" type="checkbox" class="h-4 w-4 rounded border-sepia-300">
         {{ $t('results.onlyOutOfRange') }}
       </label>
+      <ColumnToggle id="results" :cols="cols" class="sm:ml-auto" />
     </div>
 
     <AppLoadError v-if="error" :loading="status === 'pending'" @retry="refresh" />
@@ -99,11 +113,11 @@ const latestLabel = (row: AnalyteOverview) =>
             <tr>
               <th class="px-4 py-2">{{ $t('results.colExam') }}</th>
               <th class="px-4 py-2 text-right">{{ $t('results.colLatest') }}</th>
-              <th class="px-4 py-2">{{ $t('results.colDate') }}</th>
-              <th class="px-4 py-2">{{ $t('results.colSituation') }}</th>
-              <th class="px-4 py-2 text-right">{{ $t('results.colChange') }}</th>
-              <th class="px-4 py-2">{{ $t('results.colTrend') }}</th>
-              <th class="px-4 py-2 text-right">{{ $t('results.colCount') }}</th>
+              <th v-if="cols.show('date')" class="px-4 py-2">{{ $t('results.colDate') }}</th>
+              <th v-if="cols.show('situation')" class="px-4 py-2">{{ $t('results.colSituation') }}</th>
+              <th v-if="cols.show('change')" class="px-4 py-2 text-right">{{ $t('results.colChange') }}</th>
+              <th v-if="cols.show('trend')" class="px-4 py-2">{{ $t('results.colTrend') }}</th>
+              <th v-if="cols.show('count')" class="px-4 py-2 text-right">{{ $t('results.colCount') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-sepia-100">
@@ -117,20 +131,20 @@ const latestLabel = (row: AnalyteOverview) =>
                 <span class="font-semibold">{{ latestLabel(row) }}</span>
                 <span class="ml-1 text-xs text-sepia-500">{{ row.unit }}</span>
               </td>
-              <td class="px-4 py-3 whitespace-nowrap text-sepia-600">{{ fmt.date(row.latestAt) }}</td>
-              <td class="px-4 py-3">
+              <td v-if="cols.show('date')" class="px-4 py-3 whitespace-nowrap text-sepia-600">{{ fmt.date(row.latestAt) }}</td>
+              <td v-if="cols.show('situation')" class="px-4 py-3">
                 <ResultsFlagBadge :flag="row.latestFlag" />
                 <p v-if="row.latestInterpretation" class="mt-0.5 text-xs text-sepia-500">{{ row.latestInterpretation }}</p>
               </td>
-              <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+              <td v-if="cols.show('change')" class="px-4 py-3 text-right tabular-nums whitespace-nowrap">
                 <template v-if="row.delta !== null">
                   {{ fmt.signedNumber(row.delta) }}
                   <span class="text-xs text-sepia-500">({{ fmt.signedPercent(row.deltaPct) }})</span>
                 </template>
                 <span v-else class="text-sepia-500">{{ $t('common.empty') }}</span>
               </td>
-              <td class="px-4 py-3"><ResultsSparkLine :values="row.sparkline" /></td>
-              <td class="px-4 py-3 text-right tabular-nums">{{ row.count }}</td>
+              <td v-if="cols.show('trend')" class="px-4 py-3"><ResultsSparkLine :values="row.sparkline" /></td>
+              <td v-if="cols.show('count')" class="px-4 py-3 text-right tabular-nums">{{ row.count }}</td>
             </tr>
           </tbody>
         </table>

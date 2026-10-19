@@ -40,12 +40,12 @@ const menuGroups = computed(() => [
 <template>
   <aside
     :class="[
-      'fixed mt-16 flex flex-col lg:mt-0 top-0 px-4 left-0 bg-sepia-950 text-sepia-100 h-screen transition-all duration-300 ease-in-out z-99999 border-r border-sepia-800',
+      'fixed bottom-0 left-0 top-16 z-[920] flex flex-col border-r border-sepia-800 bg-sepia-950 px-4 text-sepia-100 transition-all duration-300 ease-in-out lg:top-0',
       {
         'lg:w-[290px]': isExpanded || isMobileOpen || isHovered,
         'lg:w-[90px]': !isExpanded && !isHovered,
         'translate-x-0 w-[290px]': isMobileOpen,
-        '-translate-x-full': !isMobileOpen,
+        '-translate-x-full max-lg:invisible': !isMobileOpen,
         'lg:translate-x-0': true,
       },
     ]"

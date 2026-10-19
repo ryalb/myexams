@@ -12,7 +12,14 @@
     "users": "Usuários",
     "logout": "Sair",
     "openMenu": "Abrir menu",
+    "closeMenu": "Fechar menu",
     "report": "Relatório"
+  },
+  "columns": {
+    "button": "Colunas",
+    "title": "Colunas visíveis",
+    "reset": "Restaurar padrão",
+    "customized": "Colunas personalizadas"
   },
   "common": {
     "loading": "Carregando…",

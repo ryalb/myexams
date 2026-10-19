@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onUnmounted, provide, inject } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, provide, inject } from 'vue'
 import type { Ref } from 'vue'
 
 interface SidebarContextType {
@@ -24,6 +24,19 @@ export function useSidebarProvider() {
   const activeItem = ref<string | null>(null)
   const openSubmenu = ref<string | null>(null)
 
+  // O menu lateral do celular é uma gaveta sobre a página: some ao trocar de rota, com
+  // Esc, e enquanto aberto a página por baixo não rola.
+  const route = useRoute()
+  watch(() => route.fullPath, () => {
+    isMobileOpen.value = false
+  })
+  watch(isMobileOpen, (open) => {
+    document.body.style.overflow = open ? 'hidden' : ''
+  })
+  const handleKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') isMobileOpen.value = false
+  }
+
   const handleResize = () => {
     const mobile = window.innerWidth < 1024
     isMobile.value = mobile
@@ -35,10 +48,13 @@ export function useSidebarProvider() {
   onMounted(() => {
     handleResize()
     window.addEventListener('resize', handleResize)
+    window.addEventListener('keydown', handleKeydown)
   })
 
   onUnmounted(() => {
     window.removeEventListener('resize', handleResize)
+    window.removeEventListener('keydown', handleKeydown)
+    document.body.style.overflow = ''
   })
 
   const toggleSidebar = () => {

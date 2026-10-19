@@ -53,6 +53,20 @@ const anyProcessing = computed(() => items.value.some((doc) => isProcessing(doc.
 const anyExtracting = computed(() => items.value.some((doc) => doc.status === 'extracting'))
 useProcessingPoll(anyProcessing, () => refresh())
 
+const cols = useColumnVisibility(
+  'documents',
+  computed(() => [
+    { key: 'collected', label: t('documents.colCollected'), required: true },
+    { key: 'laboratory', label: t('documents.colLaboratory') },
+    { key: 'file', label: t('documents.colFile'), mobileHidden: true },
+    { key: 'status', label: t('documents.colStatus') },
+    { key: 'results', label: t('documents.colResults') },
+    { key: 'review', label: t('documents.colReview'), mobileHidden: true },
+    { key: 'outOfRange', label: t('documents.colOutOfRange'), mobileHidden: true },
+    { key: 'uploaded', label: t('documents.colUploaded'), mobileHidden: true },
+  ]),
+)
+
 const warningSummary = (doc: ExamDocument) => doc.warnings.map((warning) => apiError.warningText(warning)).join('\n')
 
 const toDelete = ref<ExamDocument | null>(null)
@@ -100,7 +114,7 @@ async function removeDocument() {
 
     <section class="rounded-lg border border-sepia-200 bg-white shadow-sm">
       <div class="flex flex-wrap items-end gap-4 border-b border-sepia-100 p-4">
-        <div>
+        <div class="w-full sm:w-auto">
           <label id="filter-status-label" class="mb-1 block text-xs font-medium text-sepia-600" for="filter-status">{{ $t('documents.filterStatus') }}</label>
           <Select
             v-model="filters.status"
@@ -111,16 +125,16 @@ async function removeDocument() {
             option-value="value"
             show-clear
             :placeholder="$t('common.all')"
-            class="w-48"
+            class="w-full sm:w-48"
           />
         </div>
-        <div>
+        <div class="w-[calc(50%-0.5rem)] sm:w-auto">
           <label class="mb-1 block text-xs font-medium text-sepia-600" for="filter-from">{{ $t('documents.filterFrom') }}</label>
-          <DatePicker v-model="filters.from" input-id="filter-from" date-format="dd/mm/yy" show-button-bar class="w-40" />
+          <DatePicker v-model="filters.from" input-id="filter-from" date-format="dd/mm/yy" show-button-bar class="w-full sm:w-40" />
         </div>
-        <div>
+        <div class="w-[calc(50%-0.5rem)] sm:w-auto">
           <label class="mb-1 block text-xs font-medium text-sepia-600" for="filter-to">{{ $t('documents.filterTo') }}</label>
-          <DatePicker v-model="filters.to" input-id="filter-to" date-format="dd/mm/yy" show-button-bar class="w-40" />
+          <DatePicker v-model="filters.to" input-id="filter-to" date-format="dd/mm/yy" show-button-bar class="w-full sm:w-40" />
         </div>
         <label class="flex items-center gap-2 pb-2 text-sm text-sepia-700">
           <input v-model="filters.outOfRange" type="checkbox" class="h-4 w-4 rounded border-sepia-300">
@@ -130,6 +144,7 @@ async function removeDocument() {
           {{ $t('documents.clearFilters') }}
         </button>
         <p class="ml-auto pb-2 text-sm text-sepia-500">{{ $t('documents.countSummary', { count }, count) }}</p>
+        <ColumnToggle id="documents" :cols="cols" />
       </div>
 
       <div class="overflow-x-auto">
@@ -137,19 +152,19 @@ async function removeDocument() {
           <thead class="bg-sepia-50 text-left text-xs uppercase tracking-wide text-sepia-500">
             <tr>
               <th class="px-4 py-3">{{ $t('documents.colCollected') }}</th>
-              <th class="px-4 py-3">{{ $t('documents.colLaboratory') }}</th>
-              <th class="px-4 py-3">{{ $t('documents.colFile') }}</th>
-              <th class="px-4 py-3">{{ $t('documents.colStatus') }}</th>
-              <th class="px-4 py-3 text-right">{{ $t('documents.colResults') }}</th>
-              <th class="px-4 py-3 text-right">{{ $t('documents.colReview') }}</th>
-              <th class="px-4 py-3 text-right">{{ $t('documents.colOutOfRange') }}</th>
-              <th class="px-4 py-3">{{ $t('documents.colUploaded') }}</th>
+              <th v-if="cols.show('laboratory')" class="px-4 py-3">{{ $t('documents.colLaboratory') }}</th>
+              <th v-if="cols.show('file')" class="px-4 py-3">{{ $t('documents.colFile') }}</th>
+              <th v-if="cols.show('status')" class="px-4 py-3">{{ $t('documents.colStatus') }}</th>
+              <th v-if="cols.show('results')" class="px-4 py-3 text-right">{{ $t('documents.colResults') }}</th>
+              <th v-if="cols.show('review')" class="px-4 py-3 text-right">{{ $t('documents.colReview') }}</th>
+              <th v-if="cols.show('outOfRange')" class="px-4 py-3 text-right">{{ $t('documents.colOutOfRange') }}</th>
+              <th v-if="cols.show('uploaded')" class="px-4 py-3">{{ $t('documents.colUploaded') }}</th>
               <th class="px-4 py-3"><span class="sr-only">{{ $t('common.actions') }}</span></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-sepia-100">
             <tr v-if="!items.length && !error">
-              <td colspan="9" class="px-4 py-10 text-center text-sepia-500">
+              <td :colspan="cols.visibleCount.value + 1" class="px-4 py-10 text-center text-sepia-500">
                 {{ hasFilters ? $t('documents.emptyFiltered') : $t('documents.empty') }}
               </td>
             </tr>
@@ -159,9 +174,9 @@ async function removeDocument() {
                   {{ fmt.date(doc.collected_on) }}
                 </NuxtLink>
               </td>
-              <td class="px-4 py-3">{{ doc.laboratory_name || $t('common.empty') }}</td>
-              <td class="px-4 py-3 max-w-[16rem] truncate" :title="doc.original_filename">{{ doc.original_filename }}</td>
-              <td class="px-4 py-3">
+              <td v-if="cols.show('laboratory')" class="px-4 py-3">{{ doc.laboratory_name || $t('common.empty') }}</td>
+              <td v-if="cols.show('file')" class="px-4 py-3 max-w-[16rem] truncate" :title="doc.original_filename">{{ doc.original_filename }}</td>
+              <td v-if="cols.show('status')" class="px-4 py-3">
                 <div class="flex items-center gap-1.5">
                   <DocumentsStatusBadge :status="doc.status" :done="doc.progress_done" :total="doc.progress_total" />
                   <Icon
@@ -181,14 +196,14 @@ async function removeDocument() {
                   {{ apiError.errorText(doc.error_code, doc.error_params) }}
                 </p>
               </td>
-              <td class="px-4 py-3 text-right tabular-nums">{{ doc.result_count }}</td>
-              <td class="px-4 py-3 text-right tabular-nums" :class="doc.review_count ? 'font-semibold text-amber-700' : ''">{{ doc.review_count }}</td>
-              <td class="px-4 py-3 text-right tabular-nums" :class="doc.out_of_range_count ? 'font-semibold text-vermelho-600' : ''">{{ doc.out_of_range_count }}</td>
-              <td class="px-4 py-3 whitespace-nowrap text-sepia-500">{{ fmt.date(doc.created_at) }}</td>
+              <td v-if="cols.show('results')" class="px-4 py-3 text-right tabular-nums">{{ doc.result_count }}</td>
+              <td v-if="cols.show('review')" class="px-4 py-3 text-right tabular-nums" :class="doc.review_count ? 'font-semibold text-amber-700' : ''">{{ doc.review_count }}</td>
+              <td v-if="cols.show('outOfRange')" class="px-4 py-3 text-right tabular-nums" :class="doc.out_of_range_count ? 'font-semibold text-vermelho-600' : ''">{{ doc.out_of_range_count }}</td>
+              <td v-if="cols.show('uploaded')" class="px-4 py-3 whitespace-nowrap text-sepia-500">{{ fmt.date(doc.created_at) }}</td>
               <td class="px-4 py-3 text-right">
                 <button
                   type="button"
-                  class="rounded p-1 text-sepia-500 hover:bg-vermelho-50 hover:text-vermelho-600"
+                  class="rounded p-2 text-sepia-500 hover:bg-vermelho-50 hover:text-vermelho-600 sm:p-1"
                   :aria-label="$t('common.delete')"
                   @click="toDelete = doc"
                 >
@@ -201,11 +216,11 @@ async function removeDocument() {
       </div>
 
       <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-sepia-100 px-4 py-3 text-sm">
-        <button type="button" class="rounded px-3 py-1 text-sepia-700 disabled:opacity-40" :disabled="!hasPrevious" @click="previous">
+        <button type="button" class="rounded px-3 py-2 text-sepia-700 disabled:opacity-40 sm:py-1" :disabled="!hasPrevious" @click="previous">
           {{ $t('common.previous') }}
         </button>
         <span class="text-sepia-500">{{ $t('common.pageOf', { page, total: totalPages }) }}</span>
-        <button type="button" class="rounded px-3 py-1 text-sepia-700 disabled:opacity-40" :disabled="!hasNext" @click="next">
+        <button type="button" class="rounded px-3 py-2 text-sepia-700 disabled:opacity-40 sm:py-1" :disabled="!hasNext" @click="next">
           {{ $t('common.next') }}
         </button>
       </div>

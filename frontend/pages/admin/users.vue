@@ -20,6 +20,18 @@ const { data: users, error, refresh, status } = await useResilientAsyncData<Admi
   { default: () => [] },
 )
 
+const cols = useColumnVisibility(
+  'admin-users',
+  computed(() => [
+    { key: 'name', label: t('admin.colName'), required: true },
+    { key: 'email', label: t('admin.colEmail') },
+    { key: 'role', label: t('admin.colRole') },
+    { key: 'status', label: t('admin.colStatus') },
+    { key: 'created', label: t('admin.colCreated'), mobileHidden: true },
+    { key: 'lastAccess', label: t('admin.colLastAccess'), mobileHidden: true },
+  ]),
+)
+
 const isSelf = (row: AdminUser) => row.id === currentUser.user?.id
 const displayName = (row: AdminUser) => row.name || row.email
 
@@ -116,7 +128,7 @@ async function confirmAction() {
 }
 
 const ACTION_BUTTON =
-  'rounded p-1.5 text-sepia-500 hover:bg-sepia-100 hover:text-sepia-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sepia-500'
+  'rounded p-2.5 text-sepia-500 sm:p-1.5 hover:bg-sepia-100 hover:text-sepia-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sepia-500'
 const actionClass = (row: AdminUser) => [ACTION_BUTTON, isSelf(row) ? 'cursor-not-allowed opacity-40 hover:bg-transparent hover:text-sepia-500' : '']
 </script>
 
@@ -143,30 +155,33 @@ const actionClass = (row: AdminUser) => [ACTION_BUTTON, isSelf(row) ? 'cursor-no
     <p id="admin-self-reason" class="sr-only">{{ $t('admin.selfDisabled') }}</p>
 
     <section class="rounded-lg border border-sepia-200 bg-white shadow-sm">
+      <div class="flex justify-end border-b border-sepia-100 p-3">
+        <ColumnToggle id="admin-users" :cols="cols" />
+      </div>
       <div class="overflow-x-auto">
         <table class="min-w-full text-sm">
           <thead class="bg-sepia-50 text-left text-xs uppercase tracking-wide text-sepia-500">
             <tr>
               <th scope="col" class="px-4 py-3">{{ $t('admin.colName') }}</th>
-              <th scope="col" class="px-4 py-3">{{ $t('admin.colEmail') }}</th>
-              <th scope="col" class="px-4 py-3">{{ $t('admin.colRole') }}</th>
-              <th scope="col" class="px-4 py-3">{{ $t('admin.colStatus') }}</th>
-              <th scope="col" class="px-4 py-3">{{ $t('admin.colCreated') }}</th>
-              <th scope="col" class="px-4 py-3">{{ $t('admin.colLastAccess') }}</th>
+              <th v-if="cols.show('email')" scope="col" class="px-4 py-3">{{ $t('admin.colEmail') }}</th>
+              <th v-if="cols.show('role')" scope="col" class="px-4 py-3">{{ $t('admin.colRole') }}</th>
+              <th v-if="cols.show('status')" scope="col" class="px-4 py-3">{{ $t('admin.colStatus') }}</th>
+              <th v-if="cols.show('created')" scope="col" class="px-4 py-3">{{ $t('admin.colCreated') }}</th>
+              <th v-if="cols.show('lastAccess')" scope="col" class="px-4 py-3">{{ $t('admin.colLastAccess') }}</th>
               <th scope="col" class="px-4 py-3"><span class="sr-only">{{ $t('common.actions') }}</span></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-sepia-100">
             <tr v-if="!users.length && !error">
-              <td colspan="7" class="px-4 py-10 text-center text-sepia-500">{{ $t('admin.empty') }}</td>
+              <td :colspan="cols.visibleCount.value + 1" class="px-4 py-10 text-center text-sepia-500">{{ $t('admin.empty') }}</td>
             </tr>
             <tr v-for="row in users" :key="row.id" :class="['hover:bg-sepia-50', row.is_active ? '' : 'text-sepia-500']">
               <td class="px-4 py-3">
                 <span class="font-medium" :class="row.is_active ? 'text-sepia-900' : ''">{{ displayName(row) }}</span>
                 <span v-if="isSelf(row)" class="ml-2 rounded bg-sepia-100 px-1.5 py-0.5 text-xs text-sepia-700">{{ $t('admin.you') }}</span>
               </td>
-              <td class="px-4 py-3">{{ row.email }}</td>
-              <td class="px-4 py-3">
+              <td v-if="cols.show('email')" class="px-4 py-3">{{ row.email }}</td>
+              <td v-if="cols.show('role')" class="px-4 py-3">
                 <span
                   v-if="row.is_admin"
                   class="inline-flex items-center gap-1 rounded-full bg-sepia-900 px-2.5 py-0.5 text-xs font-medium text-sepia-50"
@@ -178,7 +193,7 @@ const actionClass = (row: AdminUser) => [ACTION_BUTTON, isSelf(row) ? 'cursor-no
                   {{ $t('admin.roleMember') }}
                 </span>
               </td>
-              <td class="px-4 py-3">
+              <td v-if="cols.show('status')" class="px-4 py-3">
                 <span
                   :class="[
                     'inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium',
@@ -189,8 +204,8 @@ const actionClass = (row: AdminUser) => [ACTION_BUTTON, isSelf(row) ? 'cursor-no
                 </span>
                 <p v-if="row.must_change_password" class="mt-1 text-xs text-amber-800">{{ $t('admin.passwordPending') }}</p>
               </td>
-              <td class="px-4 py-3 whitespace-nowrap">{{ fmt.date(row.date_joined) }}</td>
-              <td class="px-4 py-3 whitespace-nowrap">
+              <td v-if="cols.show('created')" class="px-4 py-3 whitespace-nowrap">{{ fmt.date(row.date_joined) }}</td>
+              <td v-if="cols.show('lastAccess')" class="px-4 py-3 whitespace-nowrap">
                 {{ row.last_login ? fmt.dateTime(row.last_login) : $t('admin.neverAccessed') }}
               </td>
               <td class="px-4 py-3">

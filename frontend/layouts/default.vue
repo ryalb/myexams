@@ -12,18 +12,18 @@ onBeforeUnmount(disconnect)
 </script>
 
 <template>
-  <div class="min-h-screen xl:flex bg-sepia-950">
+  <div class="min-h-dvh bg-sepia-950 xl:flex">
     <LayoutAppSidebar />
     <LayoutBackdrop />
     <div
-      class="flex-1 min-h-screen bg-sepia-50 text-sepia-900 transition-all duration-300 ease-in-out"
+      class="min-h-dvh min-w-0 flex-1 bg-sepia-50 text-sepia-900 transition-all duration-300 ease-in-out"
       :class="[isExpanded || isHovered ? 'lg:ml-[290px]' : 'lg:ml-[90px]']"
     >
       <LayoutAppHeader />
       <main class="p-4 mx-auto max-w-screen-2xl md:p-6">
         <!-- A região viva fica sempre montada: leitores de tela só anunciam mudanças
              dentro de uma região que já existia. O papel (alert/status) vai no aviso. -->
-        <div aria-live="polite" aria-atomic="true">
+        <div aria-live="polite" aria-atomic="true" class="sticky top-[4.75rem] z-[800]">
           <div
             v-if="notice"
             :role="notice.kind === 'error' ? 'alert' : 'status'"
@@ -35,7 +35,7 @@ onBeforeUnmount(disconnect)
             ]"
           >
             <span>{{ notice.text }}</span>
-            <button type="button" :aria-label="$t('common.close')" @click="dismiss">
+            <button type="button" class="-m-2 shrink-0 p-2" :aria-label="$t('common.close')" @click="dismiss">
               <Icon icon="mdi:close" class="h-4 w-4" aria-hidden="true" />
             </button>
           </div>

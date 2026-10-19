@@ -38,7 +38,7 @@ const handleSubmit = async () => {
 </script>
 
 <template>
-  <div class="flex min-h-screen w-full bg-sepia-50">
+  <div class="flex min-h-dvh w-full bg-sepia-50">
     <div class="hidden lg:flex lg:w-[44%] flex-col justify-between bg-sepia-950 p-12 text-sepia-100">
       <NuxtLink to="/" class="flex items-center gap-3">
         <img src="/logo.png" :alt="$t('app.name')" class="h-9 w-auto">
@@ -76,7 +76,7 @@ const handleSubmit = async () => {
               type="email"
               autocomplete="username"
               :placeholder="$t('auth.emailPlaceholder')"
-              class="h-11 w-full rounded-none border-0 border-b-2 border-sepia-200 bg-transparent px-1 text-sm text-sepia-900 placeholder:text-sepia-500 focus:border-sepia-500 focus:outline-none focus:ring-0"
+              class="h-11 w-full rounded-none border-0 border-b-2 border-sepia-200 bg-transparent px-1 text-base text-sepia-900 sm:text-sm placeholder:text-sepia-500 focus:border-sepia-500 focus:outline-none focus:ring-0"
             >
           </div>
 
@@ -91,11 +91,11 @@ const handleSubmit = async () => {
                 :type="showPassword ? 'text' : 'password'"
                 autocomplete="current-password"
                 :placeholder="$t('auth.passwordPlaceholder')"
-                class="h-11 w-full rounded-none border-0 border-b-2 border-sepia-200 bg-transparent px-1 pr-9 text-sm text-sepia-900 placeholder:text-sepia-500 focus:border-sepia-500 focus:outline-none focus:ring-0"
+                class="h-11 w-full rounded-none border-0 border-b-2 border-sepia-200 bg-transparent px-1 pr-9 text-base text-sepia-900 sm:text-sm placeholder:text-sepia-500 focus:border-sepia-500 focus:outline-none focus:ring-0"
               >
               <button
                 type="button"
-                class="absolute top-1/2 right-1 -translate-y-1/2 text-sepia-500 hover:text-sepia-700"
+                class="absolute top-1/2 right-0 -translate-y-1/2 p-2 text-sepia-500 hover:text-sepia-700"
                 :aria-label="showPassword ? $t('common.hidePassword') : $t('common.showPassword')"
                 @click="showPassword = !showPassword"
               >

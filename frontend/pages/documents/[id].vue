@@ -11,6 +11,16 @@ const { t } = useI18n()
 const { get, post, patch, del } = useApi()
 const fmt = useFormat()
 const apiError = useApiError()
+const cols = useColumnVisibility(
+  'document-results',
+  computed(() => [
+    { key: 'exam', label: t('document.colExam'), required: true },
+    { key: 'value', label: t('document.colValue'), required: true },
+    { key: 'reference', label: t('document.colReference'), mobileHidden: true },
+    { key: 'situation', label: t('document.colSituation') },
+    { key: 'review', label: t('document.colReview') },
+  ]),
+)
 const notice = useNotice()
 
 // As três leituras são independentes: disparadas juntas, não em fila. O
@@ -305,7 +315,7 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
     </section>
 
     <dl class="grid grid-cols-2 gap-4 rounded-lg border border-sepia-200 bg-white p-4 shadow-sm md:grid-cols-3 xl:grid-cols-6">
-      <div>
+      <div class="min-w-0 break-words">
         <dt class="text-xs uppercase tracking-wide text-sepia-500">{{ $t('document.collectedOn') }}</dt>
         <dd class="text-sm font-medium">{{ fmt.date(doc.collected_on) }}</dd>
       </div>
@@ -337,6 +347,7 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
           {{ $t('document.resultsTitle') }}
         </h2>
         <div class="flex flex-wrap items-center gap-3">
+          <ColumnToggle id="document-results" :cols="cols" />
           <label class="flex items-center gap-2 text-xs text-sepia-700">
             <input v-model="reviewOnly" type="checkbox" class="h-4 w-4 rounded border-sepia-300">
             {{ $t('document.reviewOnly') }}
@@ -360,15 +371,15 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
             <tr>
               <th class="px-4 py-2">{{ $t('document.colExam') }}</th>
               <th class="px-4 py-2 text-right">{{ $t('document.colValue') }}</th>
-              <th class="px-4 py-2">{{ $t('document.colReference') }}</th>
-              <th class="px-4 py-2">{{ $t('document.colSituation') }}</th>
-              <th class="px-4 py-2">{{ $t('document.colReview') }}</th>
+              <th v-if="cols.show('reference')" class="px-4 py-2">{{ $t('document.colReference') }}</th>
+              <th v-if="cols.show('situation')" class="px-4 py-2">{{ $t('document.colSituation') }}</th>
+              <th v-if="cols.show('review')" class="px-4 py-2">{{ $t('document.colReview') }}</th>
               <th class="px-4 py-2"><span class="sr-only">{{ $t('common.actions') }}</span></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-sepia-100">
             <tr v-if="!rows.length">
-              <td colspan="6" class="px-4 py-8 text-center text-sepia-500">{{ $t('document.noResults') }}</td>
+              <td :colspan="cols.visibleCount.value + 1" class="px-4 py-8 text-center text-sepia-500">{{ $t('document.noResults') }}</td>
             </tr>
             <tr
               v-for="row in rows"
@@ -402,14 +413,14 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
                   {{ row.source_line }}
                 </p>
               </td>
-              <td class="px-4 py-3 max-w-[20rem] whitespace-pre-line text-xs text-sepia-600" :title="row.reference_raw">
+              <td v-if="cols.show('reference')" class="px-4 py-3 max-w-[20rem] whitespace-pre-line text-xs text-sepia-600" :title="row.reference_raw">
                 {{ firstLines(row.reference_raw) || $t('common.empty') }}
               </td>
-              <td class="px-4 py-3">
+              <td v-if="cols.show('situation')" class="px-4 py-3">
                 <ResultsFlagBadge :flag="row.flag" />
                 <p v-if="row.interpretation" class="mt-0.5 text-xs text-sepia-500">{{ row.interpretation }}</p>
               </td>
-              <td class="px-4 py-3">
+              <td v-if="cols.show('review')" class="px-4 py-3">
                 <span class="text-xs text-sepia-600">{{ $t(`reviewStatus.${row.review_status}`) }}</span>
                 <ul v-if="row.warnings.length" class="mt-1 space-y-0.5 text-xs text-amber-800">
                   <li v-for="warning in row.warnings" :key="warning.code" class="flex gap-1">
@@ -422,7 +433,7 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
                 <button
                   v-if="row.review_status === 'needs_review'"
                   type="button"
-                  class="rounded p-1 text-sepia-500 hover:bg-sepia-100 hover:text-azul-700"
+                  class="rounded p-2 text-sepia-500 hover:bg-sepia-100 hover:text-azul-700 sm:p-1"
                   :title="$t('document.confirmRow')"
                   :aria-label="$t('document.confirmRow')"
                   :disabled="acting"
@@ -432,7 +443,7 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
                 </button>
                 <button
                   type="button"
-                  class="rounded p-1 text-sepia-500 hover:bg-sepia-100 hover:text-sepia-900"
+                  class="rounded p-2 text-sepia-500 hover:bg-sepia-100 hover:text-sepia-900 sm:p-1"
                   :aria-label="$t('common.edit')"
                   @click="editing = row"
                 >
@@ -441,7 +452,7 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
                 <button
                   v-if="row.origin === 'manual'"
                   type="button"
-                  class="rounded p-1 text-sepia-500 hover:bg-vermelho-50 hover:text-vermelho-700"
+                  class="rounded p-2 text-sepia-500 hover:bg-vermelho-50 hover:text-vermelho-700 sm:p-1"
                   :title="$t('document.manualDelete')"
                   :aria-label="$t('document.manualDeleteFor', { name: row.name_raw })"
                   :disabled="acting"
@@ -461,15 +472,17 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
         {{ $t('document.previousTitle') }} ({{ previous.length }})
       </summary>
       <p class="px-4 text-xs text-sepia-500">{{ $t('document.previousHint') }}</p>
-      <table class="mt-2 min-w-full text-sm">
-        <tbody class="divide-y divide-sepia-100">
-          <tr v-for="row in previous" :key="row.id">
-            <td class="px-4 py-2">{{ row.analyte_info?.name ?? row.name_raw }}</td>
-            <td class="px-4 py-2 whitespace-nowrap text-sepia-600">{{ fmt.date(row.collected_at) }}</td>
-            <td class="px-4 py-2 text-right tabular-nums">{{ row.value_raw }} <span class="text-xs text-sepia-500">{{ row.unit }}</span></td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="overflow-x-auto">
+        <table class="mt-2 min-w-full text-sm">
+          <tbody class="divide-y divide-sepia-100">
+            <tr v-for="row in previous" :key="row.id">
+              <td class="px-4 py-2">{{ row.analyte_info?.name ?? row.name_raw }}</td>
+              <td class="px-4 py-2 whitespace-nowrap text-sepia-600">{{ fmt.date(row.collected_at) }}</td>
+              <td class="px-4 py-2 text-right tabular-nums">{{ row.value_raw }} <span class="text-xs text-sepia-500">{{ row.unit }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </details>
 
     <details v-if="doc.page_text.length" class="rounded-lg border border-sepia-200 bg-white shadow-sm">

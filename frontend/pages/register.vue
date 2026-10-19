@@ -42,7 +42,7 @@ const fields = [
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-sepia-50 px-6 py-12">
+  <div class="flex min-h-dvh items-center justify-center bg-sepia-50 px-6 py-12">
     <div class="w-full max-w-sm">
       <img src="/logo.png" :alt="$t('app.name')" class="mx-auto mb-4 h-14 w-auto">
       <p class="text-xs font-medium uppercase tracking-widest text-sepia-500">{{ $t('auth.registerEyebrow') }}</p>
@@ -59,7 +59,7 @@ const fields = [
             v-model="form[field.key]"
             :type="field.type"
             :autocomplete="field.autocomplete"
-            class="h-11 w-full rounded-none border-0 border-b-2 border-sepia-200 bg-transparent px-1 text-sm text-sepia-900 focus:border-sepia-500 focus:outline-none focus:ring-0"
+            class="h-11 w-full rounded-none border-0 border-b-2 border-sepia-200 bg-transparent px-1 text-base text-sepia-900 sm:text-sm focus:border-sepia-500 focus:outline-none focus:ring-0"
           >
         </div>
 

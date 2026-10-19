@@ -98,7 +98,7 @@ function download() {
           {{ $t('report.period') }}
           <select
             v-model="range"
-            class="h-10 rounded-md border border-sepia-200 bg-white px-3 text-sm focus:border-sepia-500 focus:outline-none"
+            class="h-11 rounded-md border border-sepia-200 bg-white px-3 text-base focus:border-sepia-500 focus:outline-none sm:h-10 sm:text-sm"
           >
             <option v-for="option in rangeOptions" :key="option.value" :value="option.value">
               {{ option.label }}
