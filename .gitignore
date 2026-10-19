@@ -20,3 +20,6 @@ fixtures/private/
 tmp/
 .neon
 .env.local
+
+# Vínculo local da CLI da Vercel (`vercel link`): nunca vai para o git
+.vercel/

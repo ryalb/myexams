@@ -204,6 +204,59 @@ repositório já está ligado a ele. O que foi executado, e o que ficou de fora 
   veja as sessões (`select pid, state, wait_event, left(query, 80) from pg_stat_activity`) e mate o
   processo antes de tentar de novo.
 
+## 4c. Registro: Vercel já criada e no ar (19/10/2026)
+
+Feita pela CLI (`npx vercel@latest`, login pelo navegador). Dois projetos Git-ligados a `ryalb/myexams`, branch `main`:
+
+| Projeto | Root Directory | Framework | Domínios públicos | Região da função |
+|---|---|---|---|---|
+| `myexams-api` (backend) | `backend` | Django | `myexams-api.vercel.app` (**use este como base da API**), `myexams-api-ryanleite-9041.vercel.app` | `gru1` |
+| `myexams-app` (frontend) | `frontend` | Nuxt (SPA) | **`myexams-app.vercel.app`**, `myexams-ryanleite-9041.vercel.app` | `gru1` |
+
+O que a CLI mostrou e vale lembrar:
+
+- **O build do backend instala do `uv.lock`** ("Installing required dependencies from uv.lock"), não do
+  `requirements.txt`; a função ficou com ~80 MB (limite: 500). O build também executa o Django, então
+  as variáveis (a `DJANGO_SECRET_KEY` em especial) precisam existir **antes** do primeiro deploy.
+- **Proteção de deploy**: o padrão do projeto novo (`all_except_custom_domains`) põe o login da Vercel na
+  frente de qualquer endereço `*.vercel.app` que não seja o principal, inclusive o alias com o nome da
+  equipe. Os dois projetos ficaram com `ssoProtection = preview` (só previews protegidos; o app tem login
+  próprio). O endereço por deploy (`myexams-<hash>-...vercel.app`) responde 400 porque não está em
+  `DJANGO_ALLOWED_HOSTS`, o que é desejado.
+- **Variáveis do backend**: só em *Production* (previews não recebem o banco). `DJANGO_SECRET_KEY` e
+  `DATABASE_URL` (a string **pooled**) são *sensitive* e não dá para lê-las de volta; as demais são
+  texto simples. `DATABASE_MIGRATE_URL` e `CLOUD_PG_MAJOR` **não** vão para a Vercel.
+- **Cuidado ao importar pelo painel**: colar o `.env.cloud` inteiro no importador põe a string DIRETA do
+  banco nos ambientes *Production e Preview* do projeto errado. Aqui isso aconteceu uma vez e foi
+  desfeito (`vercel api ... -X DELETE ... --dangerously-skip-permissions`; sem a flag o comando pede
+  confirmação e, em script, falha sem avisar).
+- **Deploy sem subir arquivos locais**: `vercel deploy` a partir desta pasta enviaria o que o `.gitignore`
+  esconde (os PDFs de `fixtures/private/`, `.env.local`). Para deployar sem novo commit use a API, que
+  faz a Vercel clonar o GitHub: `POST /v13/deployments` com `gitSource` (`type: github`, `repoId`, `ref`).
+- **CORS** do backend: `https://myexams-app.vercel.app` e o alias com o nome da equipe.
+  `DJANGO_CSRF_TRUSTED_ORIGINS`: o da API. Trocou o endereço do frontend? Atualize o CORS **e faça novo deploy do backend**.
+- **Por que não `myexams.vercel.app`**: esse nome já é de outro projeto no mundo (responde 200 com o site dele), então
+  a Vercel acrescentou um sufixo aleatório (`-zeta`). O nome do endereço `*.vercel.app` vem do **nome do projeto**:
+  o frontend foi renomeado para `myexams-app` (livre; teste com `curl -sI https://NOME.vercel.app`: `404` +
+  `x-vercel-error: DEPLOYMENT_NOT_FOUND` = livre). Renomear **não** liga o novo endereço sozinho: foi preciso
+  `POST /v10/projects/myexams-app/domains` com `{"name":"myexams-app.vercel.app"}`; o `-zeta` saiu do projeto com
+  `DELETE /v9/projects/myexams-app/domains/myexams-zeta.vercel.app` (`--dangerously-skip-permissions`).
+  Um domínio próprio, se um dia quiser, entra pelo mesmo caminho (seção 10).
+- **Provado na stack real** (usuário sintético, apagado no fim): login 200 (1,5 s), upload 202 (1,2 s,
+  lido na própria requisição), resultados, 413 acima de 4,5 MB, e cada usuário só vê os próprios laudos.
+
+**Dados levados (19/10/2026), pela Opção B** (seção 9): conta, perfil, catálogo, laboratórios, 22 laudos, 946 resultados
+(826 do laudo, 119 anteriores impressos, 1 digitado à mão) e 22 execuções, numa única transação (13 s). Conferido
+tabela a tabela contra o banco local por **contagem e checksum do conteúdo** (oito tabelas idênticas), sem FK
+órfã e com as sequências acima do maior id. A conta veio **com a mesma senha do ambiente local** e já era
+administradora; `make_admin` rodou de novo na nuvem só para confirmar. Backup logo depois:
+`fixtures/private/db-backups/cloud-<data>.dump`.
+
+- Os arquivos SQL com os dados são apagados ao fim (o `trap` do script roda mesmo se algo falhar).
+- **Laboratórios são linhas compartilhadas**: apagar um usuário de teste não apaga o laboratório que o
+  upload dele criou. O ensaio na stack real deixou um laboratório fictício ("Exemplo"), que foi removido
+  à mão (só se nenhum laudo o referencia). Em ensaios futuros, confira `select * from exams_laboratory`.
+
 ## 5. Passo 2: segredos e arquivos locais
 
 Crie `backend/.env.cloud` (ignorado pelo git; só as tarefas `cloud-*` o leem, **nunca** o servidor local):
@@ -348,7 +401,7 @@ docker exec myexams-db-1 pg_dump -U myexams -d myexams --data-only --no-owner --
   cat fixtures/private/dados-local.sql ) > fixtures/private/carga-nuvem.sql
 PGENV="$(mktemp)"   # variáveis PG* da string direta do .env.cloud; a senha não vai para a linha de comando
 ( cd backend && uv run python -m config.pgenv .env.cloud env "$PGENV" )
-docker run --rm -i --env-file "$PGENV" postgres:17-alpine \
+docker run --rm -i --env-file "$PGENV" postgres:<CLOUD_PG_MAJOR>-alpine \   # a mesma versão do projeto Neon (18)
   psql -v ON_ERROR_STOP=1 -1 -q -o /dev/null < fixtures/private/carga-nuvem.sql
 rm -f "$PGENV" fixtures/private/dados-local.sql fixtures/private/carga-nuvem.sql
 ```
