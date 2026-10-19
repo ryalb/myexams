@@ -96,6 +96,10 @@ db 5433, redis 6380, API 8100, web 3100. As tasks `kill-port` só mexem nas port
   (`block_unreadable` sem título); se o PDF inteiro é imagem, o laudo falha com `llm_disabled`.
   `--no-llm`, `export_reports` e `backfill_warnings` usam o mesmo desligamento, só durante o
   comando (`offline.py::offline_settings`, um `override_settings`: nada vaza). Padrão do código: ligado.
+- **Relatório para LLM remoto** (`/report`): `GET /api/v1/report/` (`history.build_report`) devolve todos os exames
+  com o histórico em uma consulta; o Markdown é montado no frontend por `utils/report.ts` (função pura, testada com
+  `bun test`). Sai do app, então só leva sexo, idade (nunca data de nascimento), exames, valores e datas: sem nome,
+  e-mail, laboratório nem pedido. "Anteriores impressos" repetidos (mesmo dia e valor) contam uma vez.
 - **O LLM só transcreve.** Números, unidades, faixas, sinalização e resolução do exame são
   determinísticos e testados (`numbers.py`, `units.py`, `reference.py`, `flags.py`, `analytes.py`).
 - **Guardas de alucinação**: valor transcrito precisa existir no texto do bloco; faltando valor

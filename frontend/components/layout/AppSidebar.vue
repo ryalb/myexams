@@ -22,6 +22,7 @@ const menuGroups = computed(() => [
     items: [
       { labelKey: 'nav.documents', path: '/documents', icon: 'mdi:file-document-multiple-outline' },
       { labelKey: 'nav.results', path: '/results', icon: 'mdi:chart-line' },
+      { labelKey: 'nav.report', path: '/report', icon: 'mdi:file-document-outline' },
     ],
   },
   {

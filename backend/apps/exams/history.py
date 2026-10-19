@@ -5,7 +5,7 @@ from datetime import datetime, time
 from django.utils import timezone
 
 from .extraction.units import convert
-from .models import Analyte, AnalyteKind, ExamResult, ResultFlag
+from .models import Analyte, AnalyteKind, ExamResult, Profile, ResultFlag
 
 
 def _when(result: ExamResult) -> datetime | None:
@@ -69,6 +69,67 @@ def build_analyte_history(user, analyte: Analyte) -> dict:
         },
         "chartable": chartable,
         "points": points,
+    }
+
+
+def _age_years(birth_date, today) -> int | None:
+    if birth_date is None:
+        return None
+    had_birthday = (today.month, today.day) >= (birth_date.month, birth_date.day)
+    years = today.year - birth_date.year - (0 if had_birthday else 1)
+    return years if years >= 0 else None
+
+
+def build_report(user) -> dict:
+    """Todos os exames com o histórico completo, em uma consulta, para o relatório em Markdown.
+
+    Privacidade: o relatório sai do app (vai a um modelo remoto), então o perfil entra só como
+    sexo e idade em anos (nunca nome, e-mail nem data de nascimento).
+    """
+    results = (
+        ExamResult.objects.filter(user=user, analyte__isnull=False)
+        .select_related("analyte", "document", "document__laboratory")
+        .prefetch_related("analyte__conversions")
+        .order_by("analyte__category", "analyte__sort_order", "analyte__pk", "collected_at", "pk")
+    )
+    grouped: dict[int, dict] = {}
+    for result in results:
+        analyte = result.analyte
+        entry = grouped.get(analyte.pk)
+        if entry is None:
+            factors = {(c.from_unit, c.to_unit): c.factor for c in analyte.conversions.all()}
+            entry = grouped[analyte.pk] = {
+                "analyte": analyte,
+                "factors": factors,
+                "points": [],
+            }
+        entry["points"].append(serialize_point(result, analyte, entry["factors"]))
+
+    analytes = []
+    for entry in grouped.values():
+        analyte = entry["analyte"]
+        points = sorted(
+            entry["points"], key=lambda p: (p["collected_at"] is None, p["collected_at"] or "")
+        )
+        analytes.append(
+            {
+                "slug": analyte.slug,
+                "name": analyte.name_pt,
+                "category": analyte.category,
+                "unit": analyte.canonical_unit,
+                "kind": analyte.kind,
+                "points": points,
+            }
+        )
+
+    profile = Profile.objects.filter(user=user).first()
+    return {
+        "generated_at": timezone.now().isoformat(),
+        "profile": {
+            "sex": profile.sex if profile else "",
+            "age": _age_years(profile.birth_date, timezone.localdate()) if profile else None,
+        },
+        "analytes": analytes,
     }
 
 

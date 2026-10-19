@@ -19,7 +19,7 @@ from .extraction.analytes import AnalyteResolver, learn_alias
 from .extraction.manual import build_manual_result, duplicate_key
 from .extraction.pipeline import find_accession_clash, laboratory_for
 from .extraction.recompute import recompute_result
-from .history import build_analyte_history, build_overview
+from .history import build_analyte_history, build_overview, build_report
 from .models import (
     CURRENT_ORIGINS,
     Analyte,
@@ -240,6 +240,15 @@ class OverviewAPIView(APIView):
 
     def get(self, request):
         return Response(build_overview(request.user))
+
+
+class ReportAPIView(APIView):
+    """Dados para o relatório executivo (Markdown) montado no frontend."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_report(request.user))
 
 
 def refresh_document_status(document: ExamDocument) -> None:

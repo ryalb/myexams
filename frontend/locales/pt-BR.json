@@ -11,7 +11,8 @@
     "profile": "Perfil",
     "users": "Usuários",
     "logout": "Sair",
-    "openMenu": "Abrir menu"
+    "openMenu": "Abrir menu",
+    "report": "Relatório"
   },
   "common": {
     "loading": "Carregando…",
@@ -232,6 +233,19 @@
     "colTrend": "Tendência",
     "colCount": "Medições",
     "onlyOutOfRange": "Somente fora da referência"
+  },
+  "report": {
+    "title": "Relatório para análise",
+    "subtitle": "Um resumo em Markdown dos seus exames, com o histórico de cada um, para colar em um modelo de linguagem.",
+    "privacyNote": "O texto sai do MyExams quando você o cola em outro serviço. Ele leva só sexo, idade, exames, valores e datas: sem nome, e-mail, laboratório nem número do pedido. Confira antes de enviar.",
+    "period": "Período",
+    "includePrompt": "Incluir instruções para o modelo",
+    "copy": "Copiar",
+    "copied": "Relatório copiado.",
+    "copyFailed": "Não foi possível copiar sozinho. O texto está selecionado: use Ctrl+C (⌘C no Mac).",
+    "download": "Baixar .md",
+    "previewLabel": "Relatório em Markdown",
+    "size": "{chars} caracteres (cerca de {tokens} tokens)"
   },
   "analyte": {
     "backToResults": "Voltar aos resultados",

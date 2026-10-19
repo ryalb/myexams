@@ -20,6 +20,7 @@ from apps.exams.views import (
     OverviewAPIView,
     ProfileAPIView,
     RegisterAPIView,
+    ReportAPIView,
     ThrottledTokenObtainPairView,
 )
 
@@ -47,6 +48,7 @@ urlpatterns = [
     path("api/v1/laboratories/", LaboratoryListAPIView.as_view(), name="laboratory-list"),
     path("api/v1/profile/", ProfileAPIView.as_view(), name="profile"),
     path("api/v1/overview/", OverviewAPIView.as_view(), name="overview"),
+    path("api/v1/report/", ReportAPIView.as_view(), name="report"),
     path("api/v1/", include(router.urls)),
     path("graphql/", JWTGraphQLView.as_view(graphiql=settings.DEBUG)),
 ]
