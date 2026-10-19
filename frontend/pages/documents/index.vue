@@ -147,7 +147,7 @@ async function removeDocument() {
         <ColumnToggle id="documents" :cols="cols" />
       </div>
 
-      <div class="overflow-x-auto">
+      <div class="relative overflow-x-auto">
         <table class="min-w-full text-sm">
           <thead class="bg-sepia-50 text-left text-xs uppercase tracking-wide text-sepia-500">
             <tr>

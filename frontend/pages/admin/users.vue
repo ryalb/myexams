@@ -158,7 +158,7 @@ const actionClass = (row: AdminUser) => [ACTION_BUTTON, isSelf(row) ? 'cursor-no
       <div class="flex justify-end border-b border-sepia-100 p-3">
         <ColumnToggle id="admin-users" :cols="cols" />
       </div>
-      <div class="overflow-x-auto">
+      <div class="relative overflow-x-auto">
         <table class="min-w-full text-sm">
           <thead class="bg-sepia-50 text-left text-xs uppercase tracking-wide text-sepia-500">
             <tr>

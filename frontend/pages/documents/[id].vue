@@ -365,7 +365,7 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
         </div>
       </div>
 
-      <div class="overflow-x-auto">
+      <div class="relative overflow-x-auto">
         <table class="min-w-full text-sm">
           <thead class="text-left text-xs uppercase tracking-wide text-sepia-500">
             <tr>
@@ -472,7 +472,7 @@ const firstLines = (text: string) => text.split('\n').slice(0, 3).join('\n')
         {{ $t('document.previousTitle') }} ({{ previous.length }})
       </summary>
       <p class="px-4 text-xs text-sepia-500">{{ $t('document.previousHint') }}</p>
-      <div class="overflow-x-auto">
+      <div class="relative overflow-x-auto">
         <table class="mt-2 min-w-full text-sm">
           <tbody class="divide-y divide-sepia-100">
             <tr v-for="row in previous" :key="row.id">

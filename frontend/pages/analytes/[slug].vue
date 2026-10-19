@@ -136,7 +136,7 @@ const tableRows = computed(() => [...points.value].reverse())
             <h2 class="text-sm font-semibold text-sepia-800">{{ $t('analyte.tableTitle') }}</h2>
             <ColumnToggle id="analyte-history" :cols="cols" />
           </div>
-          <div class="overflow-x-auto">
+          <div class="relative overflow-x-auto">
             <table class="min-w-full text-sm">
               <thead class="text-left text-xs uppercase tracking-wide text-sepia-500">
                 <tr>

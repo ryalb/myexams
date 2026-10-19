@@ -107,7 +107,7 @@ const latestLabel = (row: AnalyteOverview) =>
       class="overflow-hidden rounded-lg border border-sepia-200 bg-white shadow-sm"
     >
       <h2 class="border-b border-sepia-100 bg-sepia-50 px-4 py-2 text-sm font-semibold text-sepia-800">{{ group.label }}</h2>
-      <div class="overflow-x-auto">
+      <div class="relative overflow-x-auto">
         <table class="min-w-full text-sm">
           <thead class="text-left text-xs uppercase tracking-wide text-sepia-500">
             <tr>
