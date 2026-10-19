@@ -7,6 +7,16 @@ const { t } = useI18n()
 const { upload } = useApi()
 const apiError = useApiError()
 const notice = useNotice()
+const config = useRuntimeConfig()
+const current = useCurrentUser()
+
+// O servidor informa o limite dele em `/auth/me/`; `NUXT_PUBLIC_MAX_UPLOAD_MB` é o plano B.
+const maxMb = computed<number | null>(
+  () => current.user?.limits?.max_upload_mb ?? (Number(config.public.maxUploadMb) || null),
+)
+onMounted(() => current.fetchUser())
+
+const DONE = new Set(['completed', 'needs_review'])
 
 const dragging = ref(false)
 const busy = ref(false)
@@ -17,11 +27,18 @@ async function send(files: File[]) {
   busy.value = true
   try {
     for (const file of files) {
+      // A plataforma corta o corpo grande antes do backend: avisa já, com a mensagem traduzida.
+      if (exceedsUploadLimit(file.size, maxMb.value)) {
+        notice.error(t('errors.file_too_large', { max_mb: maxMb.value }))
+        continue
+      }
       const form = new FormData()
       form.append('file', file)
       try {
-        await upload('/exam-documents/', form)
-        notice.success(t('documents.uploadSuccess'))
+        const created = await upload<{ status?: string }>('/exam-documents/', form)
+        // Na nuvem a leitura roda dentro da requisição: o laudo pode voltar já lido.
+        if (DONE.has(created?.status ?? '')) notice.success(t('documents.uploadDone'))
+        else notice.success(t('documents.uploadSuccess'))
         emit('uploaded')
       } catch (error) {
         notice.error(apiError.message(error))
@@ -56,7 +73,9 @@ const openPicker = () => input.value?.click()
     <p class="text-sm font-medium text-sepia-900">
       {{ busy ? $t('documents.uploading') : $t('documents.uploadHint') }}
     </p>
-    <p class="text-xs text-sepia-500">{{ $t('documents.uploadLimit') }}</p>
+    <p class="text-xs text-sepia-500">
+      {{ maxMb ? $t('documents.uploadLimitWithSize', { max: maxMb }) : $t('documents.uploadLimit') }}
+    </p>
     <Button
       type="button"
       :disabled="busy"

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://msq-cluster-traefik-alt.rno.shld.apple.com:8888/optimus-api/1/schema/config.json",
+  "mcp": {
+    "neon": {
+      "type": "remote",
+      "url": "https://mcp.neon.tech/mcp",
+      "oauth": {}
+    }
+  }
+}

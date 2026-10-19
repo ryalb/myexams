@@ -68,7 +68,9 @@
     "uploadHint": "Arraste um PDF aqui ou clique para escolher",
     "uploadLimit": "Somente PDF. O arquivo é apagado assim que a leitura termina.",
     "uploading": "Enviando…",
+    "uploadLimitWithSize": "Somente PDF, até {max} MB. O arquivo é apagado assim que a leitura termina.",
     "uploadSuccess": "Laudo enviado. A leitura começou.",
+    "uploadDone": "Laudo enviado e lido.",
     "chooseFile": "Escolher arquivo",
     "filterStatus": "Situação",
     "filterOutOfRange": "Somente com resultados fora da referência",
@@ -453,7 +455,8 @@
     "genericError": "Algo deu errado. Tente novamente.",
     "networkError": "Não foi possível conectar ao servidor.",
     "loadError": "Não foi possível carregar os dados.",
-    "tooManyRequests": "Muitas tentativas. Aguarde um pouco e tente novamente."
+    "tooManyRequests": "Muitas tentativas. Aguarde um pouco e tente novamente.",
+    "payloadTooLarge": "O arquivo é grande demais para o servidor aceitar."
   },
   "primevue": {
     "dateFormat": "dd/mm/yy",

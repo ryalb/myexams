@@ -11,6 +11,9 @@ extração termina e nenhum valor de exame vai para log.
 Base técnica: `myfinances` (mesma stack e convenções). A arquitetura e as diferenças em
 relação a ele estão em [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+**Quer publicar na nuvem?** O guia passo a passo (Vercel + Neon, só Postgres, sem worker nem Redis) está em
+[`docs/DEPLOY.md`](docs/DEPLOY.md). Tudo é opcional e vem desligado: sem as variáveis novas o app roda como descrito aqui.
+
 ## Stack
 
 | Camada | Tecnologias |
@@ -34,6 +37,7 @@ myexams/
   fixtures/private/        # laudos para avaliação local (ignorado pelo git)
   scripts/                 # setup.sh, ollama-pull.sh e ollama-log.sh
   docs/ARCHITECTURE.md
+  docs/DEPLOY.md           # deploy na Vercel + Neon (preparado, não executado)
   docker-compose.yml       # só Postgres e Redis
   mise.toml
 ```
@@ -145,6 +149,10 @@ andamento por WebSocket.
 | `db-backup` | Backup do banco (`pg_dump`, formato custom) em `fixtures/private/db-backups/`, fora do git e com permissão 0600; confere que o arquivo é restaurável |
 | `db-reset` | Faz o `db-backup`, **apaga o banco local** e roda as migrations do zero (re-sincroniza o catálogo). Só roda em banco local. `mise run db-reset -- --yes --keep-users` mantém as contas e os perfis (mesmas senhas); sem `--yes`, pede para digitar o nome do banco |
 | `make-admin` | Concede o papel de administrador do app a uma conta existente (`mise run make-admin -- voce@email.com`; `--revoke` retira). Ver "Administração de usuários" |
+| `cloud-migrate` | **Nuvem** (ver [`docs/DEPLOY.md`](docs/DEPLOY.md)): migra o banco de `DATABASE_MIGRATE_URL` (a string direta do Neon, em `backend/.env.cloud`) e cria a tabela de cache. Mostra só host/banco/esquema e exige `--yes`: `mise run cloud-migrate -- --yes` |
+| `cloud-backup` | **Nuvem**: `pg_dump -Fc` do banco da nuvem (pelo Docker, conexão direta) em `fixtures/private/db-backups/cloud-<data>.dump` (fora do git, 0600), conferido com `pg_restore --list` |
+| `cloud-manage` | **Nuvem**: qualquer comando do `manage.py` contra o banco da nuvem, ex.: `mise run cloud-manage -- make_admin voce@email.com` |
+| `backend-requirements` | Regenera `backend/requirements.txt` (só produção) a partir do `uv.lock`; um teste falha se ficar desatualizado |
 | `kill-port <porta>` | Mata processos numa porta |
 
 Hooks de commit:

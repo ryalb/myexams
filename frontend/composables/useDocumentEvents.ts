@@ -76,11 +76,13 @@ export function useDocumentEvents() {
   }
 
   function connect() {
-    if (!accessToken.value || typeof WebSocket === 'undefined') return
+    // Sem WebSocket configurado (nuxt.config: `realtime`), nada é aberto: as telas convergem
+    // pelo polling de `useProcessingPoll`, sem erro no console nem reconexão.
+    const wsBase = websocketBase(config.public)
+    if (!wsBase || !accessToken.value || typeof WebSocket === 'undefined') return
     clearTimers()
     detach()
     active = true
-    const wsBase = config.public.apiBaseUrl.replace(/^http/, 'ws').replace(/\/api\/v1\/?$/, '')
     const socket = new WebSocket(`${wsBase}/ws/documents/?token=${encodeURIComponent(accessToken.value)}`)
     ws = socket
 

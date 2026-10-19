@@ -1,7 +1,8 @@
 # Arquitetura do MyExams
 
 Visão técnica do fluxo de dados e das decisões de projeto. Para subir o projeto, veja o
-[`README.md`](../README.md).
+[`README.md`](../README.md). O desenho abaixo é o do desenvolvimento local; a variante de nuvem (Vercel + Neon, leitura
+dentro da requisição, sem worker, Redis nem WebSocket) está em [`DEPLOY.md`](DEPLOY.md).
 
 ## Componentes
 

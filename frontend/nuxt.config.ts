@@ -36,6 +36,14 @@ export default defineNuxtConfig({
     public: {
       apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || 'http://localhost:8100/api/v1',
       graphqlEndpoint: process.env.NUXT_PUBLIC_GRAPHQL_ENDPOINT || 'http://localhost:8100/graphql/',
+      // Tempo real (WebSocket). Ligado por padrão (desenvolvimento). Na nuvem não há WebSocket:
+      // `NUXT_PUBLIC_REALTIME=false` manda o app direto para o polling, sem socket nem retentativas.
+      realtime: process.env.NUXT_PUBLIC_REALTIME !== 'false',
+      // Base do WebSocket (ex.: wss://api.exemplo.com.br). Vazia = derivada de `apiBaseUrl`.
+      wsBaseUrl: process.env.NUXT_PUBLIC_WS_BASE_URL || '',
+      // Limite de upload (MB) quando a API ainda não informou o dela (`/auth/me/` traz `limits`).
+      // 0 = desconhecido: o backend decide.
+      maxUploadMb: Number(process.env.NUXT_PUBLIC_MAX_UPLOAD_MB) || 0,
     },
   },
   apollo: {

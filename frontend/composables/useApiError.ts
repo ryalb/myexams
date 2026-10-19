@@ -30,6 +30,8 @@ export function useApiError() {
     const data = (error as { data?: ApiErrorBody })?.data
     // Throttle do DRF: o corpo vem em inglês ("Request was throttled…").
     if (status === 429) return t('messages.tooManyRequests')
+    // 413 sem código nosso: a plataforma cortou o corpo antes de o backend responder.
+    if (status === 413 && !(data && typeof data.code === 'string')) return t('messages.payloadTooLarge')
     if (data && typeof data === 'object') {
       if (typeof data.code === 'string') {
         const translated = fromCode(data.code, data.params)

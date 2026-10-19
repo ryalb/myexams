@@ -105,6 +105,44 @@ db 5433, redis 6380, API 8100, web 3100. As tasks `kill-port` só mexem nas port
 - **"Anteriores:"** impressos no laudo viram resultados `origin=lab_previous`.
 - O texto das páginas (sem CPF/RG) fica em `ExamDocument.page_text` e permite reprocessar.
 
+## Deploy (Vercel + Neon)
+Guia em `docs/DEPLOY.md`; preparado, **não executado**. Tudo é opt-in por env e o padrão local não muda
+(Daphne + Celery + Redis + Postgres 5433 + WebSocket). Lógica pura em `config/envconf.py` (testada sem banco).
+- **Alvo**: Neon só como Postgres (AWS `sa-east-1`, Postgres 18); Vercel projeto A = `frontend/` (Nuxt SPA), projeto B =
+  `backend/` (Django **WSGI**, `tool.vercel.entrypoint`, `backend/vercel.json` com `gru1`, `maxDuration` 60,
+  `excludeFiles`). Na Vercel o `ASGI_APPLICATION` some (senão ela escolhe ASGI) e `DJANGO_AUTO_MIGRATE` vira `false`: a
+  função nunca migra.
+- **Modo inline**: `CELERY_TASK_ALWAYS_EAGER=true` lê o laudo na requisição de upload (broker `memory://`, nenhuma conexão
+  com Redis; resposta 202 já com o status final; `sweep_orphans` roda a cada upload). Cloud exige também
+  `EXTRACTION_USE_LLM=false` (o padrão do código é `true`), `DJANGO_CACHE=db` (tabela `django_cache`) e
+  `DJANGO_CHANNEL_LAYER=none`. O frontend usa `NUXT_PUBLIC_REALTIME=false` (sem socket, só polling).
+- **Banco**: `DATABASE_URL` (stdlib, sem dependência nova) vence as `POSTGRES_*`. Duas strings do Neon: a COM pooler
+  (host `ep-xxx-pooler...`, PgBouncer em modo transação) vai em `DATABASE_URL` na Vercel; a DIRETA (sem `-pooler`) vai em
+  `DATABASE_MIGRATE_URL`, só lido com `EXAMS_CLOUD_MIGRATE=1`, ou seja, pelas tarefas `cloud-*` do mise (que leem
+  `backend/.env.cloud`, nunca o `.env` local). `-pooler` no primeiro trecho do host liga o modo transação sozinho
+  (`DATABASE_POOLER=direct|transaction` força): `DISABLE_SERVER_SIDE_CURSORS`, `prepare_threshold=None`, `CONN_MAX_AGE=0`.
+  `reset_db` continua recusando banco remoto e o modo cloud. `sslmode`, `channel_binding`, `options`, `connect_timeout` etc.
+  da URL passam para o libpq (`URL_OPTION_KEYS`).
+- **Cold start do Neon** (compute suspenso após 5 min ociosos, a partir de centenas de ms): com banco remoto o padrão é
+  `connect_timeout=10` (`DATABASE_CONNECT_TIMEOUT`) e UMA nova tentativa só ao abrir a conexão
+  (`DATABASE_CONNECT_RETRIES`, `config/db_backend`); local fica sem nenhum dos dois. Nunca refaz transação em andamento.
+- **Esquema**: o padrão e o recomendado é o `public` (o Data API do Neon vem desligado). `DATABASE_SCHEMA=myexams` é opcional
+  (plano B caso o Data API seja ligado: o acesso que ele concede é só ao `public`). O pooler do Neon recusa
+  `options=-c search_path=...`: em modo transação o `search_path` vem do papel (`ALTER ROLE ... SET search_path`); fora dele
+  vai por `options`. `pg_trgm` usa o `TrigramExtension` do Django (criada pelo dono uma vez, ou pela migration se o papel tem
+  CREATE no banco). **Sem RLS/`harden_database`**: foi removido de propósito (o Neon não expõe nada por padrão). Papel do app
+  criado por SQL (sem `neon_superuser`, sem `BYPASSRLS`), dono das tabelas.
+- **Catálogo em lote**: `catalog.sync_catalog` usa `bulk_create`/`bulk_update` (~10 consultas, só escreve o que mudou, nunca toca apelido de
+  usuário nem re-aponta apelido existente). Com o Neon a ~230 ms por consulta o sync linha a linha não terminava; `test_catalog_sync.py` trava o custo.
+- **Backup**: `mise run cloud-backup` (`scripts/cloud-backup.sh`) faz `pg_dump -Fc` pela string direta, no Docker
+  (`postgres:<CLOUD_PG_MAJOR>-alpine`), com as credenciais em variáveis `PG*` de um `--env-file` temporário
+  (`config/pgenv.py`), nunca na linha de comando; confere com `pg_restore --list`. Restauração e PITR: `docs/DEPLOY.md`.
+- **Dependências**: `daphne`/`redis`/`channels_redis` estão no grupo `local` (`default-groups = ["dev", "local"]`, então
+  `uv sync` não muda). A Vercel instala `backend/requirements.txt` (`mise run backend-requirements`; teste confere o `uv.lock`).
+- **Cuidados**: envs de segurança (`DJANGO_SECURE_*`, `DJANGO_CORS_ALLOWED_ORIGINS`, `DRF_NUM_PROXIES=1`...) desligadas por
+  padrão; `DJANGO_ADMIN_ENABLED=false` tira o `/admin/`; upload na nuvem 4 MB (`EXAMS_MAX_UPLOAD_MB`), `/tmp` para o PDF, e o
+  limite vai ao frontend em `/auth/me/` (`limits.max_upload_mb`). Nunca ponha URL, senha ou chave reais em docs ou testes.
+
 ## Convenções
 - **Privacidade (dado de saúde)**: inferência só local (`assert_local_inference`; sobrescrever só
   com `AI_ALLOW_REMOTE_INFERENCE=true`). **Nunca logar valores de exame**, nem CPF/RG.

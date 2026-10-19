@@ -1,0 +1,11 @@
+# O que NÃO sobe para a Vercel (dado de saúde, ambiente local e lixo de build).
+.venv
+.env
+.env.*
+!.env.example
+tmp_uploads
+staticfiles
+__pycache__
+.pytest_cache
+.ruff_cache
+apps/exams/tests

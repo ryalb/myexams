@@ -747,41 +747,120 @@ CATALOG: list[Entry] = [
 
 
 def sync_catalog(analyte_model, alias_model, conversion_model) -> int:
-    """Cria/atualiza o catálogo sem apagar o que o usuário acrescentou."""
+    """Cria/atualiza o catálogo sem apagar o que o usuário acrescentou.
+
+    Em lote (uma dúzia de consultas, não milhares): com o banco longe (Neon a ~200 ms por ida e
+    volta) o sync linha a linha levava minutos. Mesmo comportamento de antes: idempotente, só
+    escreve o que mudou, nunca toca apelido de usuário nem re-aponta um apelido que já existe
+    (quem aparece primeiro no catálogo fica com ele).
+    """
+    from django.db import transaction
+    from django.utils import timezone
+
     has_user = any(f.name == "user" for f in alias_model._meta.get_fields())
-    count = 0
-    for order, entry in enumerate(CATALOG):
-        analyte, _ = analyte_model.objects.update_or_create(
-            slug=entry.slug,
-            defaults={
+    has_updated_at = any(f.name == "updated_at" for f in analyte_model._meta.get_fields())
+    now = timezone.now()
+
+    def decimal_or_none(value):
+        # Na precisão da coluna (4 casas): `Decimal(0.1)` != `Decimal("0.1000")` do banco, e a
+        # comparação "mudou?" precisa enxergar os dois como iguais.
+        return None if value is None else Decimal(value).quantize(Decimal("0.0001"))
+
+    with transaction.atomic():
+        # --- exames ---------------------------------------------------------------------
+        existing = {
+            a.slug: a for a in analyte_model.objects.filter(slug__in=[e.slug for e in CATALOG])
+        }
+        to_create, to_update = [], []
+        analyte_fields = (
+            "name_pt",
+            "category",
+            "kind",
+            "canonical_unit",
+            "is_calculated",
+            "plausible_min",
+            "plausible_max",
+            "sort_order",
+        )
+        for order, entry in enumerate(CATALOG):
+            wanted = {
                 "name_pt": entry.name,
                 "category": entry.category,
                 "kind": entry.kind,
                 "canonical_unit": entry.unit,
                 "is_calculated": entry.calculated,
-                "plausible_min": None if entry.minimum is None else Decimal(entry.minimum),
-                "plausible_max": None if entry.maximum is None else Decimal(entry.maximum),
+                "plausible_min": decimal_or_none(entry.minimum),
+                "plausible_max": decimal_or_none(entry.maximum),
                 "sort_order": order,
-            },
-        )
-        keys = {normalize_name(entry.name), *(normalize_name(a) for a in entry.aliases)}
-        keys |= {sorted_tokens_key(k) for k in keys}
-        for key in keys:
-            if not key:
-                continue
-            # Só apelidos globais: o de usuário nunca é tocado. Em migration antiga
-            # (modelo histórico sem `user`) usa a chamada sem o campo.
-            lookup = {"user": None} if has_user else {}
-            alias_model.objects.get_or_create(
-                alias_normalized=key,
-                defaults={"analyte": analyte, "source": "seed"},
-                **lookup,
+            }
+            current = existing.get(entry.slug)
+            if current is None:
+                to_create.append(analyte_model(slug=entry.slug, **wanted))
+            elif any(getattr(current, name) != value for name, value in wanted.items()):
+                for name, value in wanted.items():
+                    setattr(current, name, value)
+                if has_updated_at:
+                    current.updated_at = now
+                to_update.append(current)
+        if to_create:
+            analyte_model.objects.bulk_create(to_create)
+        if to_update:
+            analyte_model.objects.bulk_update(
+                to_update, [*analyte_fields, *(["updated_at"] if has_updated_at else [])]
             )
-        for from_unit, factor in entry.conversions:
-            conversion_model.objects.update_or_create(
-                analyte=analyte,
-                from_unit=from_unit,
-                defaults={"to_unit": entry.unit, "factor": Decimal(factor)},
+        analytes = {
+            a.slug: a for a in analyte_model.objects.filter(slug__in=[e.slug for e in CATALOG])
+        }
+
+        # --- apelidos globais (o de usuário nunca é tocado) ---------------------------------
+        scope = alias_model.objects.filter(user__isnull=True) if has_user else alias_model.objects
+        taken = set(scope.values_list("alias_normalized", flat=True))
+        new_aliases = []
+        for entry in CATALOG:
+            keys = {normalize_name(entry.name), *(normalize_name(a) for a in entry.aliases)}
+            keys |= {sorted_tokens_key(k) for k in keys}
+            for key in sorted(keys):
+                if not key or key in taken:
+                    continue
+                taken.add(key)  # o primeiro do catálogo fica com o apelido, como antes
+                extra = {"user": None} if has_user else {}
+                new_aliases.append(
+                    alias_model(
+                        alias_normalized=key, analyte=analytes[entry.slug], source="seed", **extra
+                    )
+                )
+        if new_aliases:
+            alias_model.objects.bulk_create(new_aliases, ignore_conflicts=True)
+
+        # --- conversões de unidade ------------------------------------------------------
+        known = {
+            (c.analyte_id, c.from_unit): c
+            for c in conversion_model.objects.filter(analyte__in=list(analytes.values()))
+        }
+        conv_create, conv_update = [], []
+        for entry in CATALOG:
+            analyte = analytes[entry.slug]
+            for from_unit, factor in entry.conversions:
+                wanted_factor = Decimal(factor).quantize(Decimal("0.00000001"))  # 8 casas
+                current = known.get((analyte.pk, from_unit))
+                if current is None:
+                    conv_create.append(
+                        conversion_model(
+                            analyte=analyte,
+                            from_unit=from_unit,
+                            to_unit=entry.unit,
+                            factor=wanted_factor,
+                        )
+                    )
+                elif current.to_unit != entry.unit or current.factor != wanted_factor:
+                    current.to_unit, current.factor = entry.unit, wanted_factor
+                    if has_updated_at:
+                        current.updated_at = now
+                    conv_update.append(current)
+        if conv_create:
+            conversion_model.objects.bulk_create(conv_create, ignore_conflicts=True)
+        if conv_update:
+            conversion_model.objects.bulk_update(
+                conv_update, ["to_unit", "factor", *(["updated_at"] if has_updated_at else [])]
             )
-        count += 1
-    return count
+    return len(CATALOG)

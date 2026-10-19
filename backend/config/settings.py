@@ -9,7 +9,29 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.logging import RichHandler
 
+from config.envconf import (
+    env_bool,
+    env_int,
+    env_list,
+    resolve_database,
+    resolve_infra,
+)
+
+# Tarefas `cloud-*` (EXAMS_CLOUD_MIGRATE=1) leem primeiro o `.env.cloud`, que NÃO é o `.env` do
+# desenvolvimento: assim `DATABASE_SCHEMA` & cia. da nuvem nunca vazam para o servidor local.
+# `load_dotenv` não sobrescreve variáveis já definidas, então o `.env.cloud` tem prioridade.
+if os.environ.get("EXAMS_CLOUD_MIGRATE", "").strip().lower() in {"1", "true", "yes", "on"}:
+    load_dotenv(
+        os.environ.get("EXAMS_CLOUD_ENV_FILE")
+        or Path(__file__).resolve().parent.parent / ".env.cloud"
+    )
 load_dotenv()
+
+# `os.environ` já com o `.env` carregado. As funções de `config.envconf` recebem este mapa.
+ENV = os.environ
+# A Vercel define `VERCEL` no build e na execução. Só serve para trocar o padrão de poucos
+# interruptores que, na plataforma, não podem ficar no valor do desenvolvimento.
+ON_VERCEL = bool(ENV.get("VERCEL"))
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -36,8 +58,12 @@ ALLOWED_HOSTS = [
     h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 ]
 
+# O /admin/ do Django é opcional. Na nuvem, `DJANGO_ADMIN_ENABLED=false` tira a rota e o app
+# (menos superfície, nenhum arquivo estático): o app tem a própria tela de usuários.
+ADMIN_ENABLED = env_bool(ENV, "DJANGO_ADMIN_ENABLED", True)
+
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    *(["django.contrib.admin"] if ADMIN_ENABLED else []),
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.postgres",
@@ -84,19 +110,24 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
+# A Vercel usa o ASGI quando os dois estão definidos; a nuvem roda em WSGI (sem WebSocket).
+if not ON_VERCEL:
+    ASGI_APPLICATION = "config.asgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("POSTGRES_DB", "myexams"),
-        "USER": os.getenv("POSTGRES_USER", "myexams"),
-        "PASSWORD": os.getenv("POSTGRES_PASSWORD", "myexams"),
-        "HOST": os.getenv("POSTGRES_HOST", "localhost"),
-        "PORT": os.getenv("POSTGRES_PORT", "5433"),
-        "OPTIONS": {"sslmode": os.getenv("POSTGRES_SSLMODE", "prefer")},
-    }
-}
+# Aplica migrations pendentes ao subir (config/boot.py). Padrão: ligado no desenvolvimento e
+# desligado na Vercel, onde migrar é um passo manual (`mise run cloud-migrate`).
+AUTO_MIGRATE = env_bool(ENV, "DJANGO_AUTO_MIGRATE", default=not ON_VERCEL)
+
+# --- Banco ------------------------------------------------------------------------------------
+# `DATABASE_URL` (postgresql://...) ou, sem ela, as `POSTGRES_*`. Detalhes em config/envconf.py.
+_DATABASE = resolve_database(ENV)
+DATABASES = {"default": _DATABASE.default}
+# Esquema próprio (padrão vazio = `public`, o recomendado no Neon). Com valor, as tabelas, o
+# `django_migrations` e o cache vão para ele; o Data API do Neon (desligado por padrão) só concede
+# acesso ao `public`, então o esquema próprio é o plano B caso ele seja ligado um dia.
+DATABASE_SCHEMA = _DATABASE.schema
+# Só as tarefas `cloud-*` ligam isto: aponta o Django para `DATABASE_MIGRATE_URL`.
+CLOUD_MIGRATE_MODE = _DATABASE.migrate_mode
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -122,6 +153,11 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    **(
+        {}
+        if env_bool(ENV, "DRF_BROWSABLE_API", True)
+        else {"DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",)}
+    ),
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
@@ -136,7 +172,7 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "apps.exams.errors.exception_handler",
     # Throttle por IP usa REMOTE_ADDR (0 proxies confiáveis), não o X-Forwarded-For,
     # que o cliente controla. Atrás de N proxies reversos confiáveis, defina
-    # DRF_NUM_PROXIES=N (a documentar no .env.example).
+    # DRF_NUM_PROXIES=N (na Vercel: 1; ver docs/DEPLOY.md).
     "NUM_PROXIES": int(os.getenv("DRF_NUM_PROXIES", "0")),
 }
 
@@ -152,21 +188,20 @@ SIMPLE_JWT = {
 
 GRAPHENE = {"SCHEMA": "config.schema.schema"}
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3100",
-]
+# Origens do frontend (lista separada por vírgulas, com esquema, sem barra final).
+CORS_ALLOWED_ORIGINS = env_list(ENV, "DJANGO_CORS_ALLOWED_ORIGINS", ["http://localhost:3100"])
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6380/0")
-
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": REDIS_URL,
-    }
-}
-
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
+# --- Redis, Celery, canais e cache -----------------------------------------------------------
+# Padrão: Redis para tudo, como no desenvolvimento. Modo "inline" da nuvem
+# (`CELERY_TASK_ALWAYS_EAGER=true`): extração dentro da requisição, broker em memória e nenhuma
+# conexão com Redis. Ver `resolve_infra` para as regras e `DJANGO_CACHE`/`DJANGO_CHANNEL_LAYER`.
+_INFRA = resolve_infra(ENV)
+REDIS_URL = _INFRA.redis_url
+CACHES = _INFRA.caches
+CHANNEL_LAYERS = _INFRA.channel_layers
+CELERY_TASK_ALWAYS_EAGER = _INFRA.eager
+CELERY_BROKER_URL = _INFRA.broker_url
+CELERY_RESULT_BACKEND = _INFRA.result_backend
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -178,13 +213,6 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # O Redis reentrega uma tarefa não confirmada após `visibility_timeout` (default 1h).
 # Tem de ser maior que o limite da tarefa, senão uma extração longa rodaria duas vezes.
 CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": 2 * 60 * 60}
-
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [REDIS_URL]},
-    },
-}
 
 # --- Laudos -----------------------------------------------------------------
 # O PDF fica em diretório privado (fora de STATIC/MEDIA, nunca servido) só
@@ -211,20 +239,47 @@ EXTRACTION_LLM_BUDGET_SECONDS = int(os.getenv("EXTRACTION_LLM_BUDGET_SECONDS", "
 # em `storage.upload_dir()`.
 FILE_UPLOAD_TEMP_DIR = EXAMS_UPLOAD_DIR
 if not _TESTING:
-    # O Django não cria FILE_UPLOAD_TEMP_DIR; sem ele o primeiro upload grande falha.
-    EXAMS_UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    EXAMS_UPLOAD_DIR.chmod(0o700)
+    # O Django não cria FILE_UPLOAD_TEMP_DIR; sem ele o primeiro upload grande falha. Em disco
+    # somente leitura (Vercel: só o /tmp é gravável) não derruba a importação das settings:
+    # `storage.upload_dir()` tenta de novo a cada upload e falha ali, com a causa clara.
+    try:
+        EXAMS_UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        EXAMS_UPLOAD_DIR.chmod(0o700)
+    except OSError:
+        pass
 # Arquivos e laudos presos (worker morto, Redis fora) mais velhos que isto são limpos
 # por `tasks.sweep_orphans` (ao subir o worker e por `manage.py sweep_uploads`).
 EXAMS_ORPHAN_HOURS = float(os.getenv("EXAMS_ORPHAN_HOURS", "3"))
 
+# --- Produção (tudo desligado por padrão; ver docs/DEPLOY.md) ---------------------------------
+# Atrás de um proxy que reescreve X-Forwarded-Proto (Vercel), o Django precisa confiar nele
+# para saber que a requisição era HTTPS. Ligue só se o proxy for confiável.
+if env_bool(ENV, "DJANGO_SECURE_PROXY_SSL_HEADER", False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = env_bool(ENV, "DJANGO_SECURE_SSL_REDIRECT", False)
+SECURE_HSTS_SECONDS = env_int(ENV, "DJANGO_SECURE_HSTS_SECONDS", 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(ENV, "DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
+SECURE_HSTS_PRELOAD = env_bool(ENV, "DJANGO_SECURE_HSTS_PRELOAD", False)
+SESSION_COOKIE_SECURE = env_bool(ENV, "DJANGO_SESSION_COOKIE_SECURE", False)
+CSRF_COOKIE_SECURE = env_bool(ENV, "DJANGO_CSRF_COOKIE_SECURE", False)
+CSRF_TRUSTED_ORIGINS = env_list(ENV, "DJANGO_CSRF_TRUSTED_ORIGINS", [])
+
 # Dado de saúde: os logs nunca devem carregar valores extraídos. Mantenha em INFO.
+# Na Vercel o log é texto puro (o handler `rich` força cores ANSI e largura 200).
+LOG_PLAIN = env_bool(ENV, "DJANGO_LOG_PLAIN", default=ON_VERCEL)
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {"rich": {"format": "%(message)s"}},
+    "formatters": {
+        "rich": {"format": "%(message)s"},
+        "plain": {"format": "%(levelname)s %(name)s: %(message)s"},
+    },
     "handlers": {
-        "console": {"class": "config.settings.FullWidthRichHandler", "formatter": "rich"},
+        "console": (
+            {"class": "logging.StreamHandler", "formatter": "plain"}
+            if LOG_PLAIN
+            else {"class": "config.settings.FullWidthRichHandler", "formatter": "rich"}
+        ),
     },
     "loggers": {
         "django": {"handlers": ["console"], "level": "INFO", "propagate": False},

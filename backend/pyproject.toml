@@ -6,8 +6,6 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "celery>=5.4,<6.0",
   "channels>=4.0.0",
-  "channels_redis>=4.2.0",
-  "daphne>=4.0.0",
   "django-cors-headers>=4.4,<5.0",
   "Django>=5.1,<6.0",
   "djangorestframework-simplejwt>=5.3,<6.0",
@@ -16,12 +14,18 @@ dependencies = [
   "pdfplumber>=0.11,<0.12",
   "psycopg[binary]>=3.2,<4.0",
   "python-dotenv>=1.0,<2.0",
-  "redis>=5.0,<6.0",
   "requests>=2.32,<3.0",
   "rich>=13.0,<14.0",
 ]
 
 [dependency-groups]
+# Só o desenvolvimento local (Daphne, WebSocket por Redis, broker/cache Redis). Fora da nuvem:
+# a Vercel roda WSGI, sem Redis nem WebSocket, e o `requirements.txt` não inclui este grupo.
+local = [
+  "channels_redis>=4.2.0",
+  "daphne>=4.0.0",
+  "redis>=5.0,<6.0",
+]
 dev = [
   "prek>=0.4,<0.5",
   "pytest>=8.3,<9.0",
@@ -30,6 +34,10 @@ dev = [
   "ruff>=0.6,<0.7",
   "ty>=0.0.1a8,<0.1",
 ]
+
+[tool.uv]
+# `uv sync` / `uv run` continuam instalando tudo, como antes.
+default-groups = ["dev", "local"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
@@ -62,3 +70,7 @@ invalid-attribute-override = "ignore"
 not-subscriptable = "ignore"
 not-iterable = "ignore"
 unsupported-operator = "ignore"
+
+# Vercel: a função serve o app por WSGI (sem WebSocket). Ver docs/DEPLOY.md.
+[tool.vercel]
+entrypoint = "config.wsgi:application"

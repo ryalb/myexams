@@ -15,6 +15,8 @@ export interface CurrentUser {
   // Senha temporária definida por um administrador: precisa ser trocada.
   must_change_password: boolean
   profile: Profile
+  // Limites do servidor que o cliente confere antes de enviar.
+  limits?: { max_upload_mb?: number }
 }
 
 // Uma busca por vez, mesmo com a barra lateral e o middleware pedindo ao mesmo tempo.

@@ -1,5 +1,4 @@
 from django.conf import settings
-from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
@@ -30,7 +29,6 @@ router.register(r"exam-results", ExamResultViewSet, basename="exam-result")
 router.register(r"analytes", AnalyteViewSet, basename="analyte")
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
     path("health/", HealthCheckAPIView.as_view(), name="health"),
     path("api/v1/auth/me/", CurrentUserAPIView.as_view(), name="current-user"),
     path("api/v1/auth/register/", RegisterAPIView.as_view(), name="register"),
@@ -52,3 +50,8 @@ urlpatterns = [
     path("api/v1/", include(router.urls)),
     path("graphql/", JWTGraphQLView.as_view(graphiql=settings.DEBUG)),
 ]
+
+if settings.ADMIN_ENABLED:
+    from django.contrib import admin
+
+    urlpatterns.insert(0, path("admin/", admin.site.urls))

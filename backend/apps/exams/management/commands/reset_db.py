@@ -29,6 +29,8 @@ KEEP_MODELS = ("auth.user", "exams.profile")
 
 def assert_local_database() -> dict:
     """Devolve a configuração do banco; recusa qualquer um que não seja da própria máquina."""
+    if getattr(settings, "CLOUD_MIGRATE_MODE", False):
+        raise CommandError("Recusado: reset_db não roda no modo de migração da nuvem.")
     config = settings.DATABASES["default"]
     host = str(config.get("HOST") or "").strip().lower()
     if host not in LOCAL_HOSTS:
@@ -40,10 +42,14 @@ def assert_local_database() -> dict:
 
 
 def drop_and_recreate_schema() -> None:
-    """Apaga tudo o que há no esquema `public` (tabelas, extensões, tipos) e o recria."""
+    """Apaga tudo o que há no esquema do app (tabelas, extensões, tipos) e o recria.
+
+    É o `public`, ou o `DATABASE_SCHEMA` quando ele está definido (aí o `public` não é tocado).
+    """
+    schema = connection.ops.quote_name(settings.DATABASE_SCHEMA or "public")
     with connection.cursor() as cursor:
-        cursor.execute("DROP SCHEMA public CASCADE")
-        cursor.execute("CREATE SCHEMA public")
+        cursor.execute(f"DROP SCHEMA {schema} CASCADE")
+        cursor.execute(f"CREATE SCHEMA {schema}")
 
 
 class Command(BaseCommand):

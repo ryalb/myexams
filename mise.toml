@@ -100,6 +100,24 @@ run = "cd backend && uv run python manage.py import_json"
 description = "Atualiza só os avisos de laudos já importados (nome do exame nos blocos não lidos), relendo os PDFs sem modelo. Ex.: mise run backfill-warnings -- ~/Laudos --email voce@email.com --dry-run"
 run = "cd backend && uv run python manage.py backfill_warnings"
 
+[tasks.backend-requirements]
+description = "Gera backend/requirements.txt (só dependências de produção) a partir do uv.lock. É o que a Vercel instala; um teste falha se ficar desatualizado"
+run = "cd backend && uv export --frozen --no-dev --no-default-groups --no-hashes --no-emit-project --no-annotate --no-header -o requirements.txt"
+
+[tasks.cloud-migrate]
+description = "Migra o banco da NUVEM (Neon; DATABASE_MIGRATE_URL de backend/.env.cloud = connection string DIRETA, sem -pooler): migrate e createcachetable. Mostra só host/banco/esquema e exige --yes. Ex.: mise run cloud-migrate -- --yes"
+env = { EXAMS_CLOUD_MIGRATE = "1" }
+run = "cd backend && uv run python manage.py cloud_migrate"
+
+[tasks.cloud-manage]
+description = "Roda qualquer comando do manage.py contra o banco da NUVEM (Neon; DATABASE_MIGRATE_URL de backend/.env.cloud). Ex.: mise run cloud-manage -- createsuperuser --username voce@email.com --email voce@email.com  |  make_admin voce@email.com  |  import_reports ../fixtures/private --recursive --no-llm"
+env = { EXAMS_CLOUD_MIGRATE = "1" }
+run = "cd backend && uv run python manage.py"
+
+[tasks.cloud-backup]
+description = "Backup do banco da NUVEM (Neon) com pg_dump -Fc no Docker, pela conexão direta de backend/.env.cloud, em fixtures/private/db-backups/cloud-<data>.dump (fora do git, 0600). Confere com pg_restore --list"
+run = "sh scripts/cloud-backup.sh"
+
 [tasks.make-admin]
 description = "Concede (ou, com --revoke, retira) o papel de administrador do app a uma conta existente. Ex.: mise run make-admin -- voce@email.com"
 run = "cd backend && uv run python manage.py make_admin"

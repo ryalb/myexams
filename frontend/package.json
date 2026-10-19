@@ -11,7 +11,8 @@
     "lint": "node scripts/build-icons.mjs --check && eslint . && node scripts/audit-buttons.mjs",
     "lint:fix": "node scripts/build-icons.mjs && eslint . --fix && node scripts/audit-buttons.mjs",
     "audit:buttons": "node scripts/audit-buttons.mjs",
-    "icons": "node scripts/build-icons.mjs"
+    "icons": "node scripts/build-icons.mjs",
+    "test": "bun test"
   },
   "dependencies": {
     "@iconify/vue": "^5.0.0",

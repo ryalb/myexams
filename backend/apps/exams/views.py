@@ -48,7 +48,7 @@ from .serializers import (
     RegisterSerializer,
 )
 from .storage import PDF_MAGIC, delete_upload, save_upload
-from .tasks import process_exam_document
+from .tasks import process_exam_document, sweep_orphans
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,18 @@ def _enqueue_extraction(document_id: int, *args) -> None:
     transaction.on_commit(run)
 
 
+def _sweep_stuck_documents() -> None:
+    """Modo inline: sem worker nem agendador, a faxina de laudos presos roda em cada upload.
+
+    Uma função cortada no meio da leitura (tempo esgotado, falha da plataforma) deixaria o laudo
+    em "Extraindo" para sempre. Nunca derruba o upload.
+    """
+    try:
+        sweep_orphans()
+    except Exception as exc:
+        logger.warning("Não foi possível varrer laudos presos (%s)", type(exc).__name__)
+
+
 def _mark_enqueue_failed(document_id: int) -> None:
     document = ExamDocument.objects.filter(pk=document_id).first()
     if document is None:
@@ -155,6 +167,9 @@ class CurrentUserAPIView(APIView):
                 "is_admin": profile.is_admin,
                 "must_change_password": profile.must_change_password,
                 "profile": ProfileSerializer(profile).data,
+                # Limites que o frontend confere antes de enviar (a plataforma pode cortar o
+                # corpo da requisição antes de o app responder com o `file_too_large`).
+                "limits": {"max_upload_mb": settings.EXAMS_MAX_UPLOAD_BYTES // (1024 * 1024)},
             }
         )
 
@@ -305,6 +320,8 @@ class ExamDocumentViewSet(
         if declared > settings.EXAMS_MAX_UPLOAD_BYTES + UPLOAD_ENVELOPE_BYTES:
             raise too_large
 
+        if settings.CELERY_TASK_ALWAYS_EAGER:
+            _sweep_stuck_documents()
         upload = request.FILES.get("file")
         if upload is None:
             raise CodedAPIError(ErrorCode.FILE_MISSING)
@@ -342,6 +359,11 @@ class ExamDocumentViewSet(
             raise
 
         _enqueue_extraction(document.pk)
+        if settings.CELERY_TASK_ALWAYS_EAGER:
+            # Modo inline: a extração já rodou nesta requisição. Devolve o estado de agora
+            # (concluído, revisão, falha) para o frontend não precisar esperar o polling; se por
+            # algum motivo ainda estiver em leitura, o polling de 5 s cobre.
+            document = self.get_queryset().filter(pk=document.pk).first() or document
         return Response(ExamDocumentSerializer(document).data, status=status.HTTP_202_ACCEPTED)
 
     def perform_destroy(self, instance):
